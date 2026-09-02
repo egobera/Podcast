@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
 import { applyTemplate } from './lib/template'
-import SignIn from './components/SignIn'
+import SignIn, { SetNewPassword } from './components/SignIn'
 import Vault from './components/Vault'
 import Characters from './components/Characters'
 import EpisodeView from './components/EpisodeView'
@@ -23,6 +23,7 @@ export default function App() {
 function Workspace() {
   const [userId, setUserId] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
+  const [recovering, setRecovering] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [projectId, setProjectId] = useState<string | null>(null)
   const [episodes, setEpisodes] = useState<Episode[]>([])
@@ -37,8 +38,10 @@ function Workspace() {
       setUserId(data.session?.user.id ?? null)
       setReady(true)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       setUserId(session?.user.id ?? null)
+      // Arriving from a reset link signs the user in, then asks for the new password.
+      if (event === 'PASSWORD_RECOVERY') setRecovering(true)
     })
     return () => sub.subscription.unsubscribe()
   }, [])
@@ -117,6 +120,7 @@ function Workspace() {
   const setupDone = steps.every(s => s.done)
 
   if (!ready) return null
+  if (recovering) return <SetNewPassword onDone={() => setRecovering(false)} />
   if (!userId) return <SignIn />
 
   const episode = view.kind === 'episode' ? episodes.find(e => e.id === view.id) : undefined

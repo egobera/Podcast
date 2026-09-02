@@ -92,3 +92,17 @@ export const Spinner = ({ size = 16, ...p }: P) => (
     </path>
   </Svg>
 )
+
+export const Eye = ({ size = 16, ...p }: P) => (
+  <Svg size={size} {...p}>
+    <path d="M1.8 8s2.4-4.2 6.2-4.2S14.2 8 14.2 8s-2.4 4.2-6.2 4.2S1.8 8 1.8 8Z" {...stroke} />
+    <circle cx="8" cy="8" r="1.9" {...stroke} />
+  </Svg>
+)
+
+export const EyeOff = ({ size = 16, ...p }: P) => (
+  <Svg size={size} {...p}>
+    <path d="M6.3 3.98A6.3 6.3 0 0 1 8 3.8c3.8 0 6.2 4.2 6.2 4.2a12 12 0 0 1-1.9 2.42M4.2 5.1A11.6 11.6 0 0 0 1.8 8S4.2 12.2 8 12.2c.9 0 1.72-.24 2.44-.6M2.6 2.6l10.8 10.8"
+      {...stroke} />
+  </Svg>
+)

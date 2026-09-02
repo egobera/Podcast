@@ -64,10 +64,18 @@ plantilla de episodio, el bloque de congelamiento y los objetivos de duración d
    - **anon public** key
    - **service_role** key (esta es secreta, nunca la pongas en el navegador)
 
-### Activar el acceso por email
+### Activar el acceso con contraseña
 
-11. **Authentication**, **Providers**, comprueba que **Email** está activado
-12. En **Authentication**, **URL Configuration**, añade `http://localhost:5173` a las URLs permitidas
+11. **Authentication**, **Providers**, **Email**: comprueba que está activado
+12. En ese mismo panel, **desactiva "Confirm email"**
+
+    Con esto entras con correo y contraseña sin que Supabase mande ningún correo. Si lo dejas
+    activado, se envía un correo de confirmación al crear la cuenta y hay que abrirlo una vez.
+    El plan gratuito limita los envíos a unos pocos por hora, así que desactivarlo evita quedarte
+    fuera si creas y borras cuentas mientras pruebas.
+
+13. En **Authentication**, **URL Configuration**, añade `http://localhost:5173` a las URLs
+    permitidas. Hace falta solo para el enlace de recuperación de contraseña.
 
 ---
 
@@ -173,7 +181,9 @@ generación masiva se corta a los 10 segundos.
 
 ## Paso 10. Primer uso
 
-1. Entra con tu email
+1. **Create an account** con tu correo y una contraseña de al menos 8 caracteres. La sesión queda
+   guardada en el navegador y se renueva sola, así que no vuelves a escribirla salvo que cierres
+   sesión o cambies de dispositivo
 2. Crea la serie. Puedes tener varias, cada una con su propia bóveda, sus voces y sus episodios.
    La pantalla de la bóveda te muestra una lista de primeros pasos hasta que la completas
 3. **Vault**: sube la sintonía de apertura, la de cierre, las camas y los tres archivos del
@@ -330,9 +340,13 @@ Estudio coloca y organiza. No talla. Esa frontera es una decisión, no una caren
 El archivo `.env` no existe o no tiene los valores. Recuerda reiniciar `npm run dev` después de
 editarlo.
 
-**El enlace de acceso no llega**
-Revisa spam. Y comprueba que la URL desde la que entras está en la lista de Supabase,
-Authentication, URL Configuration.
+**"That email and password do not match an account"**
+Si acabas de registrarte y "Confirm email" sigue activado en Supabase, la cuenta existe pero está
+sin confirmar. O desactivas esa opción, o abres el correo de confirmación una vez.
+
+**El correo de recuperación no llega**
+Revisa spam, y comprueba que la URL desde la que entras está en Supabase, Authentication, URL
+Configuration. El plan gratuito limita los envíos por hora.
 
 **"Not signed in" al generar**
 La sesión caducó. Recarga la página.

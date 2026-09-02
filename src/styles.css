@@ -158,7 +158,9 @@ input, textarea, select { font: inherit; color: inherit; }
   position: relative;
 }
 
-.page { max-width: 760px; padding: 36px 40px 140px; }
+/* Standalone pages (vault, characters) keep a comfortable cap.
+   Inside the episode grid the column fills instead, and the text does the limiting. */
+.page { max-width: 1240px; padding: 36px 44px 140px; }
 
 .page h2 {
   font-family: var(--serif);
@@ -229,7 +231,7 @@ input, textarea, select { font: inherit; color: inherit; }
 
 .row {
   display: grid;
-  grid-template-columns: 72px 1fr auto;
+  grid-template-columns: 76px minmax(0, 1fr) 132px;
   gap: 14px;
   align-items: baseline;
   padding: 10px 10px 10px 12px;
@@ -260,7 +262,7 @@ input, textarea, select { font: inherit; color: inherit; }
   font-family: var(--serif);
   font-size: 1.0625rem;
   line-height: 1.5;
-  max-width: 62ch;
+  max-width: 74ch;
   color: var(--text);
 }
 .row[data-kind='sfx'] .row-text,
@@ -269,7 +271,7 @@ input, textarea, select { font: inherit; color: inherit; }
   font-style: italic; color: var(--text-2); font-size: var(--t-md);
 }
 
-.row-side { display: flex; align-items: center; gap: 8px; }
+.row-side { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 
 /* actions appear on hover or focus, so the page stays quiet at rest */
 .row-actions {
@@ -340,10 +342,12 @@ input, textarea, select { font: inherit; color: inherit; }
 
 .episode-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 336px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   align-items: start;
   gap: 0;
+  max-width: 1920px;
 }
+.episode-grid > .page { max-width: none; padding-right: 36px; }
 
 .inspector-panel {
   position: sticky; top: 47px;
@@ -448,7 +452,7 @@ select.inline:hover { border-color: var(--text-3); }
 
 /* ================= cards ================= */
 
-.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(236px, 1fr)); gap: 12px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(252px, 1fr)); gap: 14px; }
 
 .card {
   border: 1px solid var(--rule-soft);
@@ -473,7 +477,7 @@ select.inline:hover { border-color: var(--text-3); }
   margin: 20px 0;
 }
 .manual h4 { margin: 0 0 6px; font-size: var(--t-md); font-weight: 600; color: #3b4756; }
-.manual p, .manual li { margin: 0 0 5px; font-size: var(--t-sm); line-height: 1.6; color: #4d5a68; }
+.manual p, .manual li { margin: 0 0 5px; font-size: var(--t-sm); line-height: 1.6; color: #4d5a68; max-width: 78ch; }
 .manual ol { margin: 8px 0 0; padding-left: 17px; }
 .manual li::marker { color: var(--alert); }
 
@@ -717,7 +721,30 @@ select.inline:hover { border-color: var(--text-3); }
 .auth h1 { font-family: var(--serif); font-weight: 400; font-size: var(--t-xl); margin: 0; }
 .auth p { margin: 0; color: var(--text-2); font-size: var(--t-sm); line-height: 1.6; }
 
-.notice { font-size: var(--t-sm); color: var(--text-2); line-height: 1.6; margin: 0; }
+.input-wrap { position: relative; display: flex; }
+.input-wrap input { flex: 1; padding-right: 38px; }
+.reveal {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; border: 0; background: none; color: var(--text-3);
+  border-radius: 6px; display: grid; place-items: center;
+  transition: color .12s var(--ease), background .12s var(--ease);
+}
+.reveal:hover { color: var(--text); background: var(--paper-1); }
+
+.hint { font-size: var(--t-xs); color: var(--text-3); }
+
+.auth-links {
+  display: flex; justify-content: space-between; gap: 12px;
+  border-top: 1px solid var(--rule-soft); padding-top: 12px; margin-top: 2px;
+}
+.auth-links button {
+  border: 0; background: none; padding: 2px 0;
+  color: var(--text-2); font-size: var(--t-sm);
+  border-bottom: 1px solid transparent;
+}
+.auth-links button:hover { color: var(--blue); border-bottom-color: var(--blue); }
+
+.notice { font-size: var(--t-sm); color: var(--text-2); line-height: 1.6; margin: 0; max-width: 78ch; }
 .error { color: var(--red); font-size: var(--t-sm); margin: 0 0 8px; }
 
 .empty {
@@ -727,7 +754,7 @@ select.inline:hover { border-color: var(--text-3); }
   font-size: var(--t-sm); line-height: 1.6;
 }
 
-@media (max-width: 1180px) {
+@media (max-width: 1240px) {
   .episode-grid { grid-template-columns: minmax(0, 1fr); }
   .inspector-panel {
     position: static; max-height: none; border-left: 0;
@@ -751,7 +778,7 @@ select.inline:hover { border-color: var(--text-3); }
 
 /* ================= library ================= */
 
-.library { max-width: 1020px; padding: 40px 40px 90px; }
+.library { max-width: 1560px; padding: 40px 44px 90px; }
 
 .lib-head {
   display: flex; align-items: flex-end; justify-content: space-between;
@@ -786,7 +813,7 @@ select.inline:hover { border-color: var(--text-3); }
 
 /* resume row */
 
-.resume { display: grid; grid-template-columns: repeat(auto-fill, minmax(238px, 1fr)); gap: 12px; }
+.resume { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
 
 .resume-card {
   text-align: left; background: var(--paper);
@@ -807,7 +834,7 @@ select.inline:hover { border-color: var(--text-3); }
 
 /* series cards */
 
-.series-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(296px, 1fr)); gap: 14px; }
+.series-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
 
 .series-card {
   text-align: left; background: var(--paper);
