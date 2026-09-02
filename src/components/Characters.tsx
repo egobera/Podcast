@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { supabase, callFunction } from '../lib/supabase'
 import { useToast } from './ui'
+import { accentsFor, labelFor } from '../lib/languages'
 import type { Character, Project } from '../lib/types'
 
 export default function Characters({ project, onChanged }: { project: Project; onChanged: () => void }) {
@@ -90,6 +91,10 @@ export default function Characters({ project, onChanged }: { project: Project; o
               {c.source === 'cloned' ? 'Cloned voice' : c.source === 'human' ? 'Recorded by a person' : 'Catalog voice'}
               {c.voice_id ? ` · ${c.voice_id.slice(0, 10)}` : ' · no voice set'}
             </p>
+            <p>
+              {labelFor(project.language_code)} · {c.accent ?? project.accent}
+              {c.accent && c.accent !== project.accent && ' · differs from the series'}
+            </p>
 
             {editing === c.id ? (
               <>
@@ -106,6 +111,13 @@ export default function Characters({ project, onChanged }: { project: Project; o
                   <label>Similarity {c.similarity}</label>
                   <input type="range" min={0} max={1} step={0.05} defaultValue={c.similarity}
                     onMouseUp={e => patch(c.id, { similarity: Number((e.target as HTMLInputElement).value) })} />
+                </div>
+                <div className="field">
+                  <label>Accent</label>
+                  <select defaultValue={c.accent ?? project.accent}
+                    onChange={e => patch(c.id, { accent: e.target.value })}>
+                    {accentsFor(project.language_code).map(a => <option key={a} value={a}>{a}</option>)}
+                  </select>
                 </div>
                 <div className="field">
                   <label>Direction notes</label>
@@ -151,6 +163,19 @@ export default function Characters({ project, onChanged }: { project: Project; o
           e.target.value = ''
         }}
       />
+
+      <div className="manual">
+        <h4>Record the clone in the language and accent you will publish in</h4>
+        <p>
+          The model does not take an accent setting. Whatever accent is in the audio you upload is
+          the accent every line will have, in every season. A voice cloned from Castilian Spanish
+          will keep sounding Castilian even when the script is written in Mexican Spanish.
+        </p>
+        <p>
+          So record the sample in the same language and accent as the series, speaking naturally,
+          and check the Accent field on the character afterwards.
+        </p>
+      </div>
 
       <div className="manual">
         <h4>Cloning a child's voice needs written consent</h4>

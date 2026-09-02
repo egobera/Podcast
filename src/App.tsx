@@ -6,17 +6,21 @@ import Vault from './components/Vault'
 import Characters from './components/Characters'
 import EpisodeView from './components/EpisodeView'
 import Library from './components/Library'
+import TeamView from './components/TeamView'
 import { AskText, ToastHost, useToast } from './components/ui'
-import type { Character, Episode, Project, SeriesAsset } from './lib/types'
+import ErrorBoundary, { SetupNeeded } from './components/ErrorBoundary'
+import type { Character, Episode, Project, SeriesAsset, Team, TeamMember } from './lib/types'
 
-type View = { kind: 'library' } | { kind: 'vault' } | { kind: 'characters' } | { kind: 'episode'; id: string }
+type View = { kind: 'library' } | { kind: 'team' } | { kind: 'vault' } | { kind: 'characters' } | { kind: 'episode'; id: string }
 type Ask = null | 'series' | 'rename' | 'episode'
 
 export default function App() {
   return (
-    <ToastHost>
-      <Workspace />
-    </ToastHost>
+    <ErrorBoundary>
+      <ToastHost>
+        <Workspace />
+      </ToastHost>
+    </ErrorBoundary>
   )
 }
 
@@ -24,6 +28,9 @@ function Workspace() {
   const [userId, setUserId] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
   const [recovering, setRecovering] = useState(false)
+  const [teams, setTeams] = useState<Team[]>([])
+  const [teamId, setTeamId] = useState<string | null>(null)
+  const [myRole, setMyRole] = useState<TeamMember['role']>('editor')
   const [projects, setProjects] = useState<Project[]>([])
   const [projectId, setProjectId] = useState<string | null>(null)
   const [episodes, setEpisodes] = useState<Episode[]>([])
@@ -31,6 +38,7 @@ function Workspace() {
   const [chars, setChars] = useState<Character[]>([])
   const [view, setView] = useState<View>({ kind: 'library' })
   const [ask, setAsk] = useState<Ask>(null)
+  const [setupError, setSetupError] = useState('')
   const toast = useToast()
 
   useEffect(() => {
@@ -46,13 +54,53 @@ function Workspace() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  const loadProjects = useCallback(async () => {
+  /** Turns any pending invitation for this email into a real membership, then loads teams. */
+  const loadTeams = useCallback(async () => {
     if (!userId) return
-    const { data } = await supabase.from('projects').select('*').eq('owner', userId).order('created_at')
+    setSetupError('')
+
+    const claimed = await supabase.rpc('claim_invites')
+    if (claimed.error && /does not exist|schema cache/i.test(claimed.error.message)) {
+      setSetupError(claimed.error.message)
+      return
+    }
+
+    const { data: memberships, error: memberErr } = await supabase.from('team_members')
+      .select('team_id, role').eq('user_id', userId)
+    if (memberErr) { setSetupError(memberErr.message); return }
+
+    let ids = (memberships ?? []).map(m => m.team_id)
+
+    // First run: nobody has a team yet, so make one.
+    if (ids.length === 0) {
+      const { data: created, error } = await supabase.from('teams')
+        .insert({ name: 'My team', created_by: userId }).select().single()
+      if (error) { setSetupError(error.message); return }
+      if (created) ids = [created.id]
+    }
+
+    const { data: ts, error: teamErr } = await supabase.from('teams')
+      .select('*').in('id', ids).order('created_at')
+    if (teamErr) { setSetupError(teamErr.message); return }
+
+    const list = (ts ?? []) as Team[]
+    setTeams(list)
+    setTeamId(id => (id && list.some(t => t.id === id) ? id : list[0]?.id ?? null))
+  }, [userId])
+
+  useEffect(() => { loadTeams() }, [loadTeams])
+
+  const loadProjects = useCallback(async () => {
+    if (!userId || !teamId) return
+    const [{ data }, { data: mine }] = await Promise.all([
+      supabase.from('projects').select('*').eq('team_id', teamId).order('created_at'),
+      supabase.from('team_members').select('role').eq('team_id', teamId).eq('user_id', userId).maybeSingle(),
+    ])
     const list = (data ?? []) as Project[]
     setProjects(list)
+    setMyRole((mine?.role ?? 'editor') as TeamMember['role'])
     setProjectId(id => (id && list.some(p => p.id === id) ? id : list[0]?.id ?? null))
-  }, [userId])
+  }, [userId, teamId])
 
   useEffect(() => { loadProjects() }, [loadProjects])
 
@@ -71,16 +119,23 @@ function Workspace() {
   useEffect(() => { loadSeries() }, [loadSeries])
 
   const project = projects.find(p => p.id === projectId) ?? null
+  const team = teams.find(t => t.id === teamId) ?? null
 
   async function createProject(name: string) {
     if (!userId) return
-    const { data } = await supabase.from('projects').insert({ owner: userId, name }).select().single()
-    if (data) {
-      await loadProjects()
-      setProjectId((data as Project).id)
-      setView({ kind: 'vault' })
-      toast(`${name} created. Start by putting your themes in the vault.`)
+    if (!teamId) {
+      toast('No team yet. Run migration 003 in Supabase and reload.', 'bad')
+      return
     }
+    const { data, error } = await supabase.from('projects')
+      .insert({ owner: userId, team_id: teamId, name }).select().single()
+    if (error) { toast(`Could not create the series: ${error.message}`, 'bad'); return }
+    if (!data) { toast('The series was not created and the database said nothing.', 'bad'); return }
+
+    await loadProjects()
+    setProjectId((data as Project).id)
+    setView({ kind: 'vault' })
+    toast(`${name} created. Start by putting your themes in the vault.`)
   }
 
   async function renameProject(name: string) {
@@ -92,10 +147,11 @@ function Workspace() {
   async function createEpisode(title: string) {
     if (!project) return
     const number = episodes.length + 1
-    const { data } = await supabase.from('episodes').insert({
+    const { data, error } = await supabase.from('episodes').insert({
       project_id: project.id, number, title,
       target_min_ms: 420000, target_max_ms: 540000,
     }).select().single()
+    if (error) { toast(`Could not create the episode: ${error.message}`, 'bad'); return }
     if (!data) return
     const placed = await applyTemplate((data as Episode).id, project.id)
     await loadSeries()
@@ -122,6 +178,7 @@ function Workspace() {
   if (!ready) return null
   if (recovering) return <SetNewPassword onDone={() => setRecovering(false)} />
   if (!userId) return <SignIn />
+  if (setupError) return <SetupNeeded message={setupError} />
 
   const episode = view.kind === 'episode' ? episodes.find(e => e.id === view.id) : undefined
 
@@ -139,13 +196,23 @@ function Workspace() {
     <div className="shell">
       <nav className="rail">
         <div className="rail-brand">
-          <h1>{project ? project.name : 'Estudio'}</h1>
+          <h1>{project ? project.name : team?.name ?? 'Estudio'}</h1>
         </div>
+
+        {teams.length > 1 && (
+          <select className="rail-select" value={teamId ?? ''}
+            onChange={e => { setTeamId(e.target.value); setView({ kind: 'library' }) }}>
+            {teams.map(t => <option key={t.id} value={t.id} style={{ color: '#000' }}>{t.name}</option>)}
+          </select>
+        )}
 
         <div className="rail-group">
           <button data-active={view.kind === 'library'} onClick={() => setView({ kind: 'library' })}>
             All series
             <span className="rail-count">{projects.length}</span>
+          </button>
+          <button data-active={view.kind === 'team'} onClick={() => setView({ kind: 'team' })}>
+            Team
           </button>
         </div>
 
@@ -180,6 +247,10 @@ function Workspace() {
       </nav>
 
       <main className="main">
+        {view.kind === 'team' && team && (
+          <TeamView team={team} userId={userId} onChanged={() => { loadTeams(); loadProjects() }} />
+        )}
+
         {view.kind === 'library' && (
           <Library
             projects={projects}

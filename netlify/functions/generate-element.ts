@@ -11,13 +11,15 @@ export default async function handler(req: Request) {
   const db = admin()
 
   const { data: el } = await db.from('elements')
-    .select('*, episodes!inner(project_id, projects!inner(owner, style_notes))')
+    .select('*, episodes!inner(project_id, projects!inner(owner, style_notes, language_code))')
     .eq('id', element_id).single()
 
   // @ts-expect-error nested select shape
   if (!el || el.episodes.projects.owner !== userId) return json({ error: 'Not found' }, 404)
   // @ts-expect-error nested select shape
   const projectId = el.episodes.project_id as string
+  // @ts-expect-error nested select shape
+  const languageCode = (el.episodes.projects.language_code ?? 'es') as string
 
   try {
     let audio: ArrayBuffer
@@ -33,6 +35,7 @@ export default async function handler(req: Request) {
         voice_id: ch.voice_id,
         model_id: ch.model,
         text: el.text_content,
+        language_code: languageCode,
         voice_settings: {
           stability: ch.stability,
           similarity_boost: ch.similarity,

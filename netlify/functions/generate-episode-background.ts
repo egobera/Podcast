@@ -16,6 +16,10 @@ export default async function handler(req: Request) {
   const db = admin()
   const projectId = owned.project_id as string
 
+  const { data: project } = await db.from('projects')
+    .select('language_code').eq('id', projectId).single()
+  const languageCode = project?.language_code ?? 'es'
+
   const { data: pending } = await db.from('elements')
     .select('*').eq('episode_id', episode_id).in('status', ['missing', 'stale']).order('idx')
 
@@ -51,6 +55,7 @@ export default async function handler(req: Request) {
               voice_id: ch.voice_id,
               model_id: ch.model,
               text: el.text_content,
+              language_code: languageCode,
               voice_settings: { stability: ch.stability, similarity_boost: ch.similarity, style: ch.style },
             })
           } else {

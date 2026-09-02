@@ -3,6 +3,7 @@ import { supabase, uploadAudio, readDuration, signedUrl } from '../lib/supabase'
 import { formatMs } from '../lib/parser'
 import ManualNote from './ManualNote'
 import { useToast } from './ui'
+import { LANGUAGES, accentsFor } from '../lib/languages'
 import type { Project, SeriesAsset } from '../lib/types'
 
 const SLOTS: { kind: string; name: string; hint: string; auto: string }[] = [
@@ -68,6 +69,11 @@ export default function Vault({ project, userId, onChanged }: { project: Project
 
   const filled = assets.filter(a => a.storage_path).length
 
+  async function setLanguage(fields: Partial<Project>) {
+    await supabase.from('projects').update(fields).eq('id', project.id)
+    onChanged()
+  }
+
   return (
     <div className="page">
       <h2>Series vault</h2>
@@ -75,6 +81,32 @@ export default function Vault({ project, userId, onChanged }: { project: Project
         Audio that belongs to the whole series, not to one episode. Set it once here and every new
         episode is born with it already in place. {filled} of {SLOTS.length} slots filled.
       </p>
+
+      <div className="lang-bar">
+        <div className="field">
+          <label>Language</label>
+          <select
+            value={project.language_code}
+            onChange={e => setLanguage({
+              language_code: e.target.value,
+              accent: accentsFor(e.target.value)[0],
+            })}
+          >
+            {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Accent</label>
+          <select value={project.accent} onChange={e => setLanguage({ accent: e.target.value })}>
+            {accentsFor(project.language_code).map(a => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        <p className="notice lang-note">
+          The language is sent to the model so it reads numbers, times and abbreviations by the
+          right rules. The accent is not a setting the model accepts: it comes from the voices you
+          pick or record. Use it to keep everyone on the same choice.
+        </p>
+      </div>
 
       <div className="cards">
         {SLOTS.map(slot => {

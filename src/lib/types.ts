@@ -3,11 +3,36 @@ export type ElementStatus = 'missing' | 'generated' | 'approved' | 'stale'
 export type Anchor = 'line' | 'scene'
 export type GainRole = 'auto' | 'voice' | 'ambience' | 'spot' | 'impact' | 'bed' | 'theme'
 
+export type Role = 'owner' | 'editor' | 'viewer'
+
+export interface Team {
+  id: string
+  name: string
+  created_by: string
+}
+
+export interface TeamMember {
+  team_id: string
+  user_id: string
+  email: string | null
+  role: Role
+}
+
+export interface TeamInvite {
+  id: string
+  team_id: string
+  email: string
+  role: Role
+}
+
 export interface Project {
+  team_id: string
   id: string
   owner: string
   name: string
   language: string
+  language_code: string
+  accent: string
   mix_target_lufs: number
   music_duck_db: number
   style_notes: string
@@ -39,6 +64,8 @@ export interface Character {
   similarity: number
   style: number
   direction_notes: string
+  accent: string | null
+  sample_language: string | null
   consent_url: string | null
   locked: boolean
 }

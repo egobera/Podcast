@@ -50,11 +50,15 @@ Cuando esté listo:
 6. Abre el archivo `supabase/schema.sql` de este proyecto, copia **todo** su contenido y pégalo
 7. Pulsa **Run**. Debe decir "Success"
 8. Nueva consulta, y repite con `supabase/migration-002-template-and-blocks.sql`
+9. Nueva consulta otra vez, y repite con `supabase/migration-003-teams.sql`
+10. Y una última con `supabase/migration-004-language.sql`
 
 El primero crea las tablas, las reglas de seguridad y el almacén de audio. El segundo añade la
-plantilla de episodio, el bloque de congelamiento y los objetivos de duración de 8 minutos.
+plantilla de episodio, el bloque de congelamiento y los objetivos de duración de 8 minutos. El
+tercero convierte todo en multiusuario.
 
-> Si ya tenías la app instalada, ejecuta solo la migración 002. No borra nada de lo que ya hay.
+> Si ya tenías la app instalada, ejecuta solo las migraciones que te falten, en orden. Ninguna borra
+> nada. La 003 mueve tus series existentes a un equipo personal y deja los archivos donde están.
 
 ### Recoger las claves
 
@@ -197,6 +201,49 @@ generación masiva se corta a los 10 segundos.
 
 ---
 
+## Idioma y acento
+
+Son dos cosas distintas y conviene no confundirlas.
+
+**El idioma** se manda al modelo en cada generación como código ISO 639-1, y determina cómo lee
+números, horas y abreviaturas. Sin fijarlo, el modelo lo adivina del texto y a veces se equivoca.
+
+**El acento no es un parámetro que el modelo acepte.** Sale de la voz. Si clonas a alguien con
+acento mexicano, todas sus líneas sonarán mexicanas, aunque el guion esté escrito en otro español.
+Si clonas a alguien de Madrid, seguirá sonando a Madrid por mucho que el texto diga *tenis* y
+*aventar*.
+
+Por eso no existe un código `es-MX`: el modelo solo conoce `es`. La variedad regional sale de dos
+sitios que sí controlas, el acento de la voz y el vocabulario del guion.
+
+En Estudio, el idioma y el acento de la serie se fijan en la bóveda. Cada personaje puede tener su
+propio acento si el papel lo pide, y la app avisa cuando difiere del de la serie.
+
+**Consecuencia práctica:** graba la muestra de clonación en el mismo idioma y acento en que vas a
+publicar. Es una decisión que se arrastra durante todas las temporadas.
+
+## Equipos
+
+Todo pertenece a un equipo, no a una persona. Los miembros de un equipo ven las mismas series, la
+misma bóveda y las mismas voces. Nada se duplica.
+
+**Invitar a alguien** es escribir su correo en la pestaña Team y elegir un rol. **Estudio no envía
+ningún correo**: la invitación queda guardada y se convierte en acceso real en cuanto esa persona
+crea su cuenta o entra con esa dirección. Avísale tú por el canal que uses normalmente.
+
+| Rol | Puede |
+|---|---|
+| Owner | Gestionar personas y todo lo demás |
+| Editor | Crear y modificar cualquier cosa |
+| Viewer | Escuchar y leer, sin modificar |
+
+Los roles se aplican en la base de datos, no en la interfaz, así que un viewer no puede escribir ni
+aunque manipule la aplicación desde el navegador.
+
+**Sobre el audio ya subido:** los archivos anteriores viven bajo la carpeta de quien los subió, y la
+migración no los mueve. En su lugar, la regla de acceso permite leerlos a cualquiera que comparta
+equipo con esa persona. Nada se rompe y nada hay que volver a subir.
+
 ## La biblioteca
 
 Al entrar aterrizas en **All series**, no dentro de un proyecto. Cada serie es una tarjeta con sus
@@ -334,11 +381,33 @@ Estudio coloca y organiza. No talla. Esa frontera es una decisión, no una caren
 
 ---
 
+## Instalarla como aplicación
+
+La app trae manifiesto e iconos, así que se puede sacar del navegador y tenerla como una ventana
+propia, sin barra de direcciones ni pestañas.
+
+**En Mac con Chrome o Edge:** abre la app, menú de los tres puntos, **Guardar y compartir**,
+**Instalar página como aplicación**. Aparece en el Launchpad y puedes anclarla al Dock.
+
+**En Mac con Safari:** menú **Archivo**, **Añadir al Dock**.
+
+**En Windows con Chrome o Edge:** el icono de instalar aparece a la derecha de la barra de
+direcciones.
+
+**En iPhone o iPad:** compartir, **Añadir a pantalla de inicio**.
+
+El icono es una onda de audio que se detiene: diez barras que suben y bajan, y donde debería estar
+la última hay un hueco. Solo son barras verticales, así que se sigue leyendo a 16 píxeles en el Dock.
+
 ## Problemas frecuentes
 
 **"Missing VITE_SUPABASE_URL"**
 El archivo `.env` no existe o no tiene los valores. Recuerda reiniciar `npm run dev` después de
 editarlo.
+
+**No puedo crear una serie y no pasa nada al pulsar**
+Casi siempre es que falta ejecutar `migration-003-teams.sql`. Sin ella no existe el equipo al que
+pertenece la serie. La app ahora te lo dice en pantalla en vez de fallar en silencio.
 
 **"That email and password do not match an account"**
 Si acabas de registrarte y "Confirm email" sigue activado en Supabase, la cuenta existe pero está
