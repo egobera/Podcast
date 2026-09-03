@@ -1,5 +1,23 @@
 import type { ElementKind, Anchor, GainRole } from './types'
 
+/** A block marker found in the script, and the range of elements it wraps. */
+export interface BlockMark {
+  name: string
+  fromIdx: number
+  toIdx: number
+}
+
+export interface CastEntry {
+  name: string
+  description: string
+}
+
+export interface ParsedScript {
+  elements: ParsedElement[]
+  marks: BlockMark[]
+  cast: CastEntry[]
+}
+
 export interface ParsedElement {
   idx: number
   scene: string
@@ -42,8 +60,50 @@ const RECURRING = /timbre|doorbell|sinton|theme|congelamiento|freeze/i
  *   (something happens)     -> a candidate sound element
  *   *(something happens)*   -> same, markdown emphasis tolerated
  */
-export function parseScript(script: string): ParsedElement[] {
+/**
+ * Reads the cast list a script already carries.
+ *
+ * Two shapes are understood, because both are how people actually write them:
+ *
+ *   | NARRADORA | Cálida, cercana, ritmo tranquilo |      a markdown table
+ *   - NILO — 8 años, impulsivo, voz clara y rápida       a dash list
+ *
+ * The first column is the name, everything after it is the description. Header rows and
+ * separator rows are skipped.
+ */
+export function parseCast(script: string): CastEntry[] {
+  const out = new Map<string, string>()
+  const NAME = /^[A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ\s.]{1,30}$/
+
+  for (const raw of script.split(/\r?\n/)) {
+    const line = raw.trim()
+
+    const row = line.match(/^\|(.+)\|$/)
+    if (row) {
+      const cells = row[1].split('|').map(c => c.replace(/[*`]/g, '').trim())
+      if (cells.length < 2) continue
+      if (/^:?-{2,}/.test(cells[0])) continue
+      const name = cells[0]
+      const desc = cells.slice(1).filter(Boolean).join('. ')
+      if (NAME.test(name) && desc && !/personaje|character/i.test(name)) {
+        out.set(name, desc)
+      }
+      continue
+    }
+
+    const item = line.match(/^[-*]\s+\*{0,2}([A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ\s.]{1,30}?)\*{0,2}\s*[—–:-]\s*(.+)$/)
+    if (item) {
+      const name = item[1].trim()
+      if (NAME.test(name)) out.set(name, item[2].replace(/[*`]/g, '').trim())
+    }
+  }
+
+  return [...out.entries()].map(([name, description]) => ({ name, description }))
+}
+
+export function parseScript(script: string): ParsedScript {
   const out: ParsedElement[] = []
+  const openMarks: (BlockMark & { closed: boolean })[] = []
   const lines = script.split(/\r?\n/)
   let scene = 'Opening'
   let idx = 0
@@ -65,6 +125,25 @@ export function parseScript(script: string): ParsedElement[] {
     }
 
     if (/^[-*_]{3,}$/.test(line)) continue
+
+    // [[Freeze]] wraps the next line. [[Freeze]] … [[/Freeze]] wraps everything between.
+    const marker = line.match(/^\*{0,2}\[\[\s*(\/?)\s*([^\]]+?)\s*\]\]\*{0,2}$/)
+    if (marker) {
+      const closing = marker[1] === '/'
+      const name = marker[2].trim()
+      if (closing) {
+        for (let i = openMarks.length - 1; i >= 0; i--) {
+          if (openMarks[i].name.toLowerCase() === name.toLowerCase() && !openMarks[i].closed) {
+            openMarks[i].toIdx = idx - 1
+            openMarks[i].closed = true
+            break
+          }
+        }
+      } else {
+        openMarks.push({ name, fromIdx: idx, toIdx: -1, closed: false })
+      }
+      continue
+    }
 
     const cue = line.match(/^\*?\(([^)]+)\)\*?$/)
     if (cue) {
@@ -92,10 +171,13 @@ export function parseScript(script: string): ParsedElement[] {
     const speech = line.match(/^\*{0,2}([A-ZÁÉÍÓÚÑÜ][A-ZÁÉÍÓÚÑÜ\s.]{1,30}?)\*{0,2}\s*:\s*(.+)$/)
     if (speech) {
       const name = speech[1].replace(/[*_]/g, '').trim()
+      // "**NILO:** *(en off, tranquilo)* Diez..." leaves markdown and a stage direction
+      // in front of the words. Both have to go, or they get spoken out loud.
       const body = speech[2]
         .replace(/^\*+/, '')
         .replace(/\*+$/, '')
-        .replace(/^\*?\([^)]*\)\*?\s*/, '')
+        .trim()
+        .replace(/^\*{0,2}\([^)]*\)\*{0,2}\s*/, '')
         .trim()
       const clean = stripTags(body)
       if (!clean) continue
@@ -112,7 +194,14 @@ export function parseScript(script: string): ParsedElement[] {
     }
   }
 
-  return out
+  // A marker with no closing tag wraps the single element that followed it.
+  const marks: BlockMark[] = openMarks.map(m => ({
+    name: m.name,
+    fromIdx: m.fromIdx,
+    toIdx: m.closed ? m.toIdx : m.fromIdx,
+  })).filter(m => m.toIdx >= m.fromIdx)
+
+  return { elements: out, marks, cast: parseCast(script) }
 }
 
 export function uniqueCharacters(elements: ParsedElement[]): string[] {

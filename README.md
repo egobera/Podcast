@@ -51,14 +51,19 @@ Cuando esté listo:
 7. Pulsa **Run**. Debe decir "Success"
 8. Nueva consulta, y repite con `supabase/migration-002-template-and-blocks.sql`
 9. Nueva consulta otra vez, y repite con `supabase/migration-003-teams.sql`
-10. Y una última con `supabase/migration-004-language.sql`
+10. Otra con `supabase/migration-004-language.sql`
+11. Otra con `supabase/migration-005-ensure-team.sql`
+12. Otra con `supabase/migration-006-flexible-vault.sql`
+13. Otra con `supabase/migration-007-block-triggers.sql`
+14. Y la última, `supabase/migration-008-suggestions.sql`
 
 El primero crea las tablas, las reglas de seguridad y el almacén de audio. El segundo añade la
 plantilla de episodio, el bloque de congelamiento y los objetivos de duración de 8 minutos. El
 tercero convierte todo en multiusuario.
 
-> Si ya tenías la app instalada, ejecuta solo las migraciones que te falten, en orden. Ninguna borra
-> nada. La 003 mueve tus series existentes a un equipo personal y deja los archivos donde están.
+> Todas las migraciones se pueden ejecutar más de una vez sin romper nada. Si una se corta a mitad
+> por un error, vuelve a ejecutarla entera desde el principio. La 003 mueve tus series existentes a
+> un equipo personal y deja los archivos de audio donde están.
 
 ### Recoger las claves
 
@@ -200,6 +205,42 @@ generación masiva se corta a los 10 segundos.
 7. Vuelve al episodio y pulsa **Generate first pass**
 
 ---
+
+## El guion describe el reparto
+
+Si el guion trae una lista de personajes, la app la lee y rellena la descripción de cada uno. Se
+entienden dos formatos, porque son los dos que se escriben de verdad:
+
+```
+| NARRADORA | Cálida, cercana, ritmo tranquilo |
+- NILO — 8 años, impulsivo, voz clara y rápida
+```
+
+Esa descripción viaja al diseñador de voces ya escrita, con los rasgos preseleccionados a partir de
+ella. Solo hay que pulsar generar. Todo es editable, y la puerta a clonar sigue abierta al lado.
+
+Los rasgos se deducen del español y se traducen a lo que el modelo entiende: *8 años* pasa a
+`child`, *pausada* a `slow and deliberate`, *grave* a `deep`. Una descripción que la app ya rellenó
+nunca se sobrescribe al releer el guion, así que si la editas se queda como la dejaste.
+
+## Dos formas de dar voz a un personaje
+
+**Clonar desde audio** copia a una persona real. Reproduce la muestra y no acepta instrucciones:
+no puedes pedirle a un clon que suene más mayor, más grave o más calmado. Lo que haya en la
+grabación es lo que sale, en todas las temporadas.
+
+**Diseñar una voz** la inventa a partir de una descripción escrita, así que la edad, la
+profundidad, la textura y el ritmo son exactamente los que pidas. El panel tiene etiquetas para
+construir la descripción, pero el texto se puede editar: una frase concreta escrita por una persona
+casi siempre gana a una lista de etiquetas.
+
+Genera tres candidatas, las escuchas, eliges una y queda fijada al personaje con su identificador
+permanente.
+
+**Cuál usar.** Una voz diseñada es inventada, así que es tuya sin permiso de nadie. También es
+menos consistente que el clon de una persona real. Para los personajes que sostienen un episodio,
+una voz grabada sigue ganando. Para la abuela que necesitas más mayor de lo que puedes grabar,
+diseñarla es el camino correcto.
 
 ## Idioma y acento
 
@@ -346,6 +387,68 @@ recorrer un episodio entero sin tocar el ratón.
 Arriba hay un filtro segmentado con el recuento de cada estado: todo, lo que falta, lo que espera
 revisión y lo aprobado.
 
+## La bóveda la define cada serie
+
+No hay una lista fija de sonidos. Añades lo que se repita en tus episodios y le pones el nombre que
+quieras: una sintonía, una cama, una cortinilla, el timbre que suena cada semana. Cada uno lleva una
+descripción y se puede marcar para que se coloque solo al principio o al final de cada episodio.
+
+**Los bloques** son formas que se repiten dentro de un episodio: algo lo abre, algo se repite
+debajo mientras dura el momento, y algo lo cierra. Defines uno en la bóveda y luego puedes envolver
+cualquier línea de cualquier guion con él. Un congelamiento del tiempo, un flashback, un sueño.
+
+Las repeticiones no tienen posición propia: se reparten a lo largo de la línea que cubren y se
+recalculan cuando esa línea cambia de duración.
+
+## Bloques que se insertan solos
+
+Un bloque puede declarar qué lo dispara, y entonces se coloca al leer el guion sin que tengas que
+insertarlo línea por línea.
+
+**Por marcador.** Escribe `[[Freeze]]` en una línea suelta y el bloque envuelve la línea siguiente.
+Añade `[[/Freeze]]` más abajo y envuelve todo lo que hay entre las dos. El marcador se configura por
+bloque, así que puedes llamarlo como quieras.
+
+**Por acotación.** Para guiones ya escritos, el bloque puede reconocer una acotación existente.
+Defines la palabra que lo abre y la que lo cierra, por ejemplo *chasquido* y *golpe de aire*, y los
+detecta sin tocar el guion.
+
+**La distinción que importa:** los bloques colocados automáticamente quedan marcados como tales.
+Al volver a leer un guion editado se rehacen desde cero, mientras que los que insertaste a mano
+sobreviven intactos. Sin esa distinción, al segundo cambio de guion tendrías bloques duplicados.
+
+## Detección de patrones
+
+La app mira los guiones y propone. Nunca cambia nada por su cuenta: un falso positivo que
+reescribiera la bóveda costaría más que teclear un marcador a mano.
+
+**Capa de episodio.** Al leer un guion, busca acotaciones que se repiten tres o más veces, y pares
+que se abren y se cierran con diálogo en medio. Ese par es la forma de un bloque, aunque el bloque
+todavía no exista.
+
+**Capa de serie.** En la bóveda, cuando ya hay dos episodios o más, mira todos a la vez. Algo que
+aparece una vez por episodio durante seis episodios es claramente recurrente aunque ningún guion lo
+repita. Esta capa exige aparecer en al menos dos episodios.
+
+Aceptar una sugerencia de sonido crea la entrada en la bóveda. Aceptar una de bloque crea el bloque
+con las palabras de apertura y cierre ya rellenas, así que a partir de ahí se coloca solo.
+
+Lo que descartas se recuerda y no vuelve a proponerse.
+
+**Un detalle:** las indicaciones de tiempo puras, como *Pausa.* o *Silencio.*, se ignoran. Le dicen
+al actor cuánto esperar, no son sonidos. Pero una acotación que solo las contiene en parte, como
+*CHASQUIDO. SILENCIO TOTAL.*, sí cuenta.
+
+## Recortar el audio
+
+La música generada casi nunca sale con la duración que necesitas. Cualquier archivo de la bóveda
+tiene un botón **Trim**: ves la forma de onda, arrastras los dos extremos, escuchas la selección y
+guardas.
+
+Guarda una copia recortada y apunta el asset a ella. El original se queda donde estaba, así que
+siempre puedes volver. La opción de fundir los extremos aplica 25 milisegundos de entrada y salida,
+suficiente para que un bucle no haga clic e imperceptible al oído.
+
 ## Cómo funcionan la plantilla y el congelamiento
 
 **La plantilla de episodio.** Los assets del vault marcados como apertura o cierre se colocan solos
@@ -404,6 +507,13 @@ la última hay un hueco. Solo son barras verticales, así que se sigue leyendo a
 **"Missing VITE_SUPABASE_URL"**
 El archivo `.env` no existe o no tiene los valores. Recuerda reiniciar `npm run dev` después de
 editarlo.
+
+**"new row violates row-level security policy for table ..."**
+Una migración se quedó a medias: la tabla tiene la seguridad activada pero le faltan políticas.
+Vuelve a ejecutar el archivo entero desde el principio. Están escritas para poder repetirse.
+
+**"policy ... already exists" al ejecutar una migración**
+Versión antigua del archivo. Usa la del paquete actual, que borra cada política antes de crearla.
 
 **No puedo crear una serie y no pasa nada al pulsar**
 Casi siempre es que falta ejecutar `migration-003-teams.sql`. Sin ella no existe el equipo al que

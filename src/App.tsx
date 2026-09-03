@@ -59,25 +59,19 @@ function Workspace() {
     if (!userId) return
     setSetupError('')
 
-    const claimed = await supabase.rpc('claim_invites')
-    if (claimed.error && /does not exist|schema cache/i.test(claimed.error.message)) {
-      setSetupError(claimed.error.message)
-      return
-    }
+    // The server decides. It claims any invitation, finds an existing team, or makes the
+    // first one, all in a single call that runs above row level security.
+    const bootstrap = await supabase.rpc('ensure_team', { team_name: 'My team' })
+    if (bootstrap.error) { setSetupError(bootstrap.error.message); return }
 
     const { data: memberships, error: memberErr } = await supabase.from('team_members')
       .select('team_id, role').eq('user_id', userId)
     if (memberErr) { setSetupError(memberErr.message); return }
 
-    let ids = (memberships ?? []).map(m => m.team_id)
-
-    // First run: nobody has a team yet, so make one.
-    if (ids.length === 0) {
-      const { data: created, error } = await supabase.from('teams')
-        .insert({ name: 'My team', created_by: userId }).select().single()
-      if (error) { setSetupError(error.message); return }
-      if (created) ids = [created.id]
-    }
+    const ids = [...new Set([
+      bootstrap.data as string,
+      ...(memberships ?? []).map(m => m.team_id),
+    ].filter(Boolean))]
 
     const { data: ts, error: teamErr } = await supabase.from('teams')
       .select('*').in('id', ids).order('created_at')

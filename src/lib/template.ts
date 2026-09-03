@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 import { IDX_TEMPLATE_OPEN, IDX_TEMPLATE_CLOSE } from './parser'
-import type { AudioElement, SeriesAsset } from './types'
+import type { AudioElement, SeriesAsset, SeriesBlock } from './types'
 
 /**
  * The episode template.
@@ -37,65 +37,63 @@ export async function applyTemplate(episodeId: string, projectId: string) {
 }
 
 /**
- * Wraps one element in a freeze.
+ * Wraps one element in a block the series has defined.
  *
- * Creates the entry before it, the return after it, and the pulses that sit underneath.
- * The pulses carry no duration of their own: they are positioned at layout time, spread
- * across the speech they cover, so their spacing follows the actor rather than a clock.
+ * The entry and the return take real time, so they push the timeline. The repeats do not:
+ * they are positioned at layout time, spread across the speech they cover, which is why
+ * their spacing follows the actor rather than a clock.
  */
-export async function insertFreeze(
+export async function insertBlock(
   episodeId: string,
-  projectId: string,
-  around: AudioElement,
-  pulseCount = 10,
+  block: SeriesBlock,
+  assets: SeriesAsset[],
+  from: AudioElement,
+  to: AudioElement = from,
+  auto = false,
 ) {
-  const { data: assets } = await supabase
-    .from('series_assets')
-    .select('*')
-    .eq('project_id', projectId)
-    .in('kind', ['freeze_in', 'freeze_pulse', 'freeze_out'])
+  const find = (id: string | null) => assets.find(a => a.id === id && a.storage_path) ?? null
+  const entry = find(block.entry_asset_id)
+  const repeat = find(block.repeat_asset_id)
+  const ret = find(block.return_asset_id)
 
-  const byKind = new Map((assets ?? []).map(a => [a.kind, a as SeriesAsset]))
-  const entry = byKind.get('freeze_in')
-  const pulse = byKind.get('freeze_pulse')
-  const ret = byKind.get('freeze_out')
-
-  if (!entry?.storage_path || !pulse?.storage_path || !ret?.storage_path) {
-    throw new Error(
-      'The freeze needs its three master files in the vault first: entry, pulse and return.',
-    )
+  if (!entry && !repeat && !ret) {
+    throw new Error(`${block.name} has no audio assigned yet. Set it up in the vault.`)
   }
 
   const blockId = crypto.randomUUID()
-  const base = around.idx
+  const rows: Record<string, unknown>[] = []
 
-  const rows: Record<string, unknown>[] = [
-    {
-      episode_id: episodeId, idx: base - 10, scene: around.scene, kind: 'music',
-      series_asset_id: entry.id, text_content: 'Freeze, entry', origin: 'block',
-      block_id: blockId, block_role: 'entry', block_seq: 0,
-      anchor: 'line', gain_role: 'impact', duration_ms: entry.duration_ms ?? 4000,
-      status: 'approved',
-    },
-  ]
-
-  for (let i = 0; i < pulseCount; i++) {
+  if (entry) {
     rows.push({
-      episode_id: episodeId, idx: base + 1 + i, scene: around.scene, kind: 'music',
-      series_asset_id: pulse.id, text_content: `Freeze, pulse ${i + 1}`, origin: 'block',
-      block_id: blockId, block_role: 'pulse', block_seq: i,
-      anchor: 'scene', gain_role: 'bed', duration_ms: pulse.duration_ms ?? 600,
+      episode_id: episodeId, idx: from.idx - 10, scene: from.scene, kind: 'music', auto,
+      series_asset_id: entry.id, text_content: `${block.name}, opens`, origin: 'block',
+      block_id: blockId, block_role: 'entry', block_seq: 0,
+      anchor: 'line', gain_role: 'impact', duration_ms: entry.duration_ms ?? 3000,
       status: 'approved',
     })
   }
 
-  rows.push({
-    episode_id: episodeId, idx: base + 90, scene: around.scene, kind: 'music',
-    series_asset_id: ret.id, text_content: 'Freeze, return', origin: 'block',
-    block_id: blockId, block_role: 'return', block_seq: pulseCount,
-    anchor: 'line', gain_role: 'impact', duration_ms: ret.duration_ms ?? 1000,
-    status: 'approved',
-  })
+  if (repeat) {
+    for (let i = 0; i < block.repeat_count; i++) {
+      rows.push({
+        episode_id: episodeId, idx: from.idx + 1 + i, scene: from.scene, kind: 'music', auto,
+        series_asset_id: repeat.id, text_content: `${block.name}, ${i + 1}`, origin: 'block',
+        block_id: blockId, block_role: 'pulse', block_seq: i,
+        anchor: 'scene', gain_role: 'bed', duration_ms: repeat.duration_ms ?? 600,
+        status: 'approved',
+      })
+    }
+  }
+
+  if (ret) {
+    rows.push({
+      episode_id: episodeId, idx: to.idx + 90, scene: to.scene, kind: 'music', auto,
+      series_asset_id: ret.id, text_content: `${block.name}, closes`, origin: 'block',
+      block_id: blockId, block_role: 'return', block_seq: block.repeat_count,
+      anchor: 'line', gain_role: 'impact', duration_ms: ret.duration_ms ?? 1000,
+      status: 'approved',
+    })
+  }
 
   await supabase.from('elements').insert(rows)
   return blockId
@@ -125,4 +123,30 @@ export async function insertVaultAsset(
     duration_ms: asset.duration_ms ?? 3000,
     status: 'approved',
   })
+}
+
+/**
+ * Finds where a block should go without a marker, by matching the stage directions the
+ * script already contains. Used for scripts written before markers existed.
+ */
+export function findCueSpans(
+  block: SeriesBlock,
+  elements: { id: string; idx: number; kind: string; text_content: string }[],
+): { fromIdx: number; toIdx: number }[] {
+  const open = block.trigger_cue?.trim().toLowerCase()
+  const close = block.end_cue?.trim().toLowerCase()
+  if (!open) return []
+
+  const cues = elements
+    .filter(e => e.kind !== 'dialogue')
+    .sort((a, b) => a.idx - b.idx)
+
+  const spans: { fromIdx: number; toIdx: number }[] = []
+  for (let i = 0; i < cues.length; i++) {
+    if (!cues[i].text_content.toLowerCase().includes(open)) continue
+    if (!close) { spans.push({ fromIdx: cues[i].idx, toIdx: cues[i].idx }); continue }
+    const end = cues.slice(i + 1).find(c => c.text_content.toLowerCase().includes(close))
+    if (end) { spans.push({ fromIdx: cues[i].idx, toIdx: end.idx }); i = cues.indexOf(end) }
+  }
+  return spans
 }

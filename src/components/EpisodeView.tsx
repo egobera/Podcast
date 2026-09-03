@@ -4,15 +4,16 @@ import {
   parseScript, uniqueCharacters, formatMs, hash, layout, runtime,
   IDX_SCRIPT_START, IDX_STEP,
 } from '../lib/parser'
-import { insertFreeze, removeBlock, insertVaultAsset } from '../lib/template'
+import { insertBlock, removeBlock, insertVaultAsset, findCueSpans } from '../lib/template'
 import ManualNote from './ManualNote'
 import Inspector from './Inspector'
+import Suggestions from './Suggestions'
 import BottomPanel from './BottomPanel'
 import { Confirm, Keys, useToast } from './ui'
 import ExportPanel from './ExportPanel'
 import { Play as PlayIcon, Check as CheckIcon } from './icons'
 import type { Clip } from '../lib/player'
-import type { AudioElement, Character, Episode, Job, Project, SeriesAsset, Take } from '../lib/types'
+import type { AudioElement, Character, Episode, Job, Project, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
 const COST_PER_ELEMENT = 0.04
 
@@ -26,6 +27,7 @@ export default function EpisodeView({
   const [elements, setElements] = useState<AudioElement[]>([])
   const [chars, setChars] = useState<Character[]>([])
   const [assets, setAssets] = useState<SeriesAsset[]>([])
+  const [blocks, setBlocks] = useState<SeriesBlock[]>([])
   const [takes, setTakes] = useState<Record<string, Take[]>>({})
   const [selected, setSelected] = useState<string | null>(null)
   const [script, setScript] = useState(episode.script_text ?? '')
@@ -43,14 +45,16 @@ export default function EpisodeView({
   const uploadTarget = useRef<string | null>(null)
 
   const load = useCallback(async () => {
-    const [{ data: els }, { data: cs }, { data: sa }] = await Promise.all([
+    const [{ data: els }, { data: cs }, { data: sa }, { data: bl }] = await Promise.all([
       supabase.from('elements').select('*').eq('episode_id', episode.id).order('idx'),
       supabase.from('characters').select('*').eq('project_id', project.id),
       supabase.from('series_assets').select('*').eq('project_id', project.id),
+      supabase.from('series_blocks').select('*').eq('project_id', project.id),
     ])
     setElements((els ?? []) as AudioElement[])
     setChars((cs ?? []) as Character[])
     setAssets((sa ?? []) as SeriesAsset[])
+    setBlocks((bl ?? []) as SeriesBlock[])
   }, [episode.id, project.id])
 
   useEffect(() => { load(); setScript(episode.script_text ?? '') }, [load, episode.id])
@@ -83,25 +87,43 @@ export default function EpisodeView({
     setError('')
     setNotice('')
     try {
-      const parsed = parseScript(script)
+      const { elements: parsed, marks, cast } = parseScript(script)
       if (parsed.length === 0) {
         setError('No lines found. Character lines look like NAME: text and sound cues go in parentheses.')
         return
       }
 
       const existing = new Map(chars.map(c => [c.name, c]))
+      const described = new Map(cast.map(c => [c.name, c.description]))
+
       const missing = uniqueCharacters(parsed).filter(n => !existing.has(n))
       if (missing.length) {
         const { data } = await supabase.from('characters')
-          .insert(missing.map(name => ({ project_id: project.id, name }))).select()
+          .insert(missing.map(name => ({
+            project_id: project.id,
+            name,
+            description: described.get(name) ?? '',
+          }))).select()
         for (const c of (data ?? []) as Character[]) existing.set(c.name, c)
+      }
+
+      // Fill in descriptions the script provides, but never overwrite one someone edited.
+      for (const [name, description] of described) {
+        const c = existing.get(name)
+        if (c && !c.description?.trim() && description) {
+          await supabase.from('characters').update({ description }).eq('id', c.id)
+        }
       }
 
       const scriptElements = elements.filter(e => e.origin === 'script')
       const previous = new Map(scriptElements.map(e => [`${e.kind}:${e.source_hash}`, e]))
       const kept = scriptElements.filter(e => e.status === 'approved').length
 
+      // Script elements are replaced, and so are blocks that inserted themselves.
+      // Blocks a person placed by hand survive untouched.
       await supabase.from('elements').delete().eq('episode_id', episode.id).eq('origin', 'script')
+      await supabase.from('elements').delete()
+        .eq('episode_id', episode.id).eq('origin', 'block').eq('auto', true)
 
       const rows = parsed.map(p => {
         const h = hash(p.text)
@@ -124,17 +146,21 @@ export default function EpisodeView({
         }
       })
 
-      await supabase.from('elements').insert(rows)
+      const { data: inserted } = await supabase.from('elements').insert(rows).select()
       await supabase.from('episodes').update({ script_text: script }).eq('id', episode.id)
+
+      // Now place the blocks the script asked for.
+      const placed = await applyAutoBlocks((inserted ?? []) as AudioElement[], marks)
       await load()
 
       const carried = rows.filter(r => r.status === 'approved').length
+      const bits: string[] = []
       if (kept > 0) {
-        setNotice(
-          `${carried} of ${kept} approved takes carried over. ` +
-          `${kept - carried} lines changed and need a new take.`,
-        )
+        bits.push(`${carried} of ${kept} approved takes carried over`)
+        if (kept - carried > 0) bits.push(`${kept - carried} lines changed and need a new take`)
       }
+      if (placed > 0) bits.push(`${placed} ${placed === 1 ? 'block' : 'blocks'} placed automatically`)
+      if (bits.length) setNotice(bits.join('. ') + '.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed')
     } finally {
@@ -142,14 +168,58 @@ export default function EpisodeView({
     }
   }
 
-  async function addFreeze(el: AudioElement) {
-    setError('')
+  /**
+   * Places every block the script asks for: first by marker, then by stage direction for
+   * blocks that declare one. Everything placed here is flagged automatic, so the next read
+   * of the script can rebuild it without disturbing manual work.
+   */
+  async function applyAutoBlocks(fresh: AudioElement[], marks: { name: string; fromIdx: number; toIdx: number }[]) {
+    if (blocks.length === 0) return 0
+    const byIdx = new Map(fresh.map(e => [(e.idx - IDX_SCRIPT_START) / IDX_STEP, e]))
+    let count = 0
+    const claimed = new Set<number>()
+
+    for (const mark of marks) {
+      const block = blocks.find(b =>
+        (b.trigger_marker || b.name).toLowerCase() === mark.name.toLowerCase())
+      const from = byIdx.get(mark.fromIdx)
+      const to = byIdx.get(mark.toIdx)
+      if (!block || !from || !to) continue
+      try {
+        await insertBlock(episode.id, block, assets, from, to, true)
+        for (let i = mark.fromIdx; i <= mark.toIdx; i++) claimed.add(i)
+        count++
+      } catch { /* the block has no audio yet, skip it quietly */ }
+    }
+
+    // Stage direction fallback, for scripts written before markers existed.
+    for (const block of blocks) {
+      if (!block.trigger_cue) continue
+      for (const span of findCueSpans(block, fresh)) {
+        const fromKey = (span.fromIdx - IDX_SCRIPT_START) / IDX_STEP
+        const toKey = (span.toIdx - IDX_SCRIPT_START) / IDX_STEP
+        if (claimed.has(fromKey)) continue
+        const from = byIdx.get(fromKey)
+        const to = byIdx.get(toKey)
+        if (!from || !to) continue
+        try {
+          await insertBlock(episode.id, block, assets, from, to, true)
+          count++
+        } catch { /* skip */ }
+      }
+    }
+    return count
+  }
+
+  async function addBlockAround(el: AudioElement, blockId: string) {
+    const block = blocks.find(b => b.id === blockId)
+    if (!block) return
     try {
-      await insertFreeze(episode.id, project.id, el)
+      await insertBlock(episode.id, block, assets, el)
       await load()
-      setNotice('Freeze wrapped around that line. Ten pulses will spread across it as the speech grows or shrinks.')
+      toast(`${block.name} wrapped around that line. The repeats spread across it and move with it.`)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not insert the freeze')
+      toast(e instanceof Error ? e.message : 'Could not insert the block', 'bad')
     }
   }
 
@@ -210,6 +280,10 @@ export default function EpisodeView({
   async function uploadOwn(elementId: string, file: File) {
     setBusyId(elementId)
     try {
+      if (!file.type.startsWith('audio/') && !/\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(file.name)) {
+        toast('That does not look like an audio file.', 'bad')
+        return
+      }
       const duration = await readDuration(file)
       const path = await uploadAudio(userId, project.id, file.name, file)
       const { data } = await supabase.from('takes').insert({
@@ -218,6 +292,9 @@ export default function EpisodeView({
       const el = elements.find(e => e.id === elementId)!
       if (data) await approve(el, data as Take)
       await loadTakes(elementId)
+      toast(`Uploaded and approved. ${formatMs(duration)}`)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Upload failed', 'bad')
     } finally {
       setBusyId(null)
     }
@@ -300,8 +377,9 @@ export default function EpisodeView({
   const approved = elements.filter(e => e.status === 'approved').length
   const pct = elements.length ? Math.round((approved / elements.length) * 100) : 0
   const inRange = total >= episode.target_min_ms && total <= episode.target_max_ms
-  const freezeReady = ['freeze_in', 'freeze_pulse', 'freeze_out']
-    .every(k => assets.some(a => a.kind === k && a.storage_path))
+  const usableBlocks = blocks.filter(b =>
+    [b.entry_asset_id, b.repeat_asset_id, b.return_asset_id]
+      .some(id => assets.some(a => a.id === id && a.storage_path)))
 
   const visibleRef = useRef(visible)
   visibleRef.current = visible
@@ -495,16 +573,12 @@ export default function EpisodeView({
           )
         })}
 
-        {!freezeReady && (
-          <div className="manual">
-            <h4>The freeze block needs its three files first</h4>
-            <p>
-              Upload the entry, the pulse and the return to the vault. Once they are there, any line
-              can be wrapped in a freeze from its inspector, and the ten pulses spread themselves
-              across the speech rather than sitting on a fixed beat.
-            </p>
-          </div>
-        )}
+        <Suggestions
+          project={project}
+          elements={elements.filter(e => e.origin === 'script')}
+          scope="episode"
+          onApplied={load}
+        />
 
         <div className="shortcuts">
           <span><Keys>space</Keys> play the episode</span>
@@ -540,7 +614,7 @@ export default function EpisodeView({
         assets={assets}
         takes={selectedEl ? takes[selectedEl.id] ?? [] : []}
         busy={busyId === selectedEl?.id}
-        freezeReady={freezeReady}
+        blocks={usableBlocks}
         blockReturnMs={blockReturnMs}
         pulseCount={pulseCount}
         episode={episode}
@@ -558,7 +632,7 @@ export default function EpisodeView({
           if (url) new Audio(url).play()
         }}
         onPlayElement={() => selectedEl && play(selectedEl)}
-        onFreeze={() => selectedEl && addFreeze(selectedEl)}
+        onAddBlock={id => selectedEl && addBlockAround(selectedEl, id)}
         onRemoveBlock={async id => { await removeBlock(id); await load() }}
         onAddVault={id => selectedEl && addVaultAsset(selectedEl, id, 'scene')}
         onExport={() => setExporting(true)}

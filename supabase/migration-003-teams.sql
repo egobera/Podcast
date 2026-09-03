@@ -1,4 +1,6 @@
 -- Estudio migration 003. Teams.
+-- Safe to run more than once. Every policy is dropped before it is created, so a partial
+-- run that failed halfway can simply be run again from the top.
 -- Run after schema.sql and migration 002. Safe on an existing database: it moves what you
 -- already have into a personal team and keeps every file where it is.
 
@@ -162,64 +164,105 @@ drop policy if exists "own elements" on elements;
 drop policy if exists "own takes" on takes;
 drop policy if exists "own jobs" on jobs;
 
+drop policy if exists "teams read" on teams;
 create policy "teams read" on teams for select using (is_team_member(id));
+drop policy if exists "teams create" on teams;
 create policy "teams create" on teams for insert with check (created_by = auth.uid());
+drop policy if exists "teams update" on teams;
 create policy "teams update" on teams for update using (is_team_owner(id));
+drop policy if exists "teams delete" on teams;
 create policy "teams delete" on teams for delete using (is_team_owner(id));
 
+drop policy if exists "members read" on team_members;
 create policy "members read" on team_members for select using (is_team_member(team_id));
-create policy "members add" on team_members for insert with check (is_team_owner(team_id));
+drop policy if exists "members add" on team_members;
+create policy "members add" on team_members for insert with check (
+  is_team_owner(team_id)
+  or (user_id = auth.uid()
+      and exists (select 1 from teams t where t.id = team_id and t.created_by = auth.uid()))
+);
+drop policy if exists "members change" on team_members;
 create policy "members change" on team_members for update using (is_team_owner(team_id));
+drop policy if exists "members remove" on team_members;
 create policy "members remove" on team_members for delete
   using (is_team_owner(team_id) or user_id = auth.uid());
 
+drop policy if exists "invites read" on team_invites;
 create policy "invites read" on team_invites for select using (is_team_member(team_id));
+drop policy if exists "invites create" on team_invites;
 create policy "invites create" on team_invites for insert with check (is_team_owner(team_id));
+drop policy if exists "invites delete" on team_invites;
 create policy "invites delete" on team_invites for delete using (is_team_owner(team_id));
 
+drop policy if exists "projects read" on projects;
 create policy "projects read" on projects for select using (is_team_member(team_id));
+drop policy if exists "projects write" on projects;
 create policy "projects write" on projects for insert with check (can_edit_team(team_id));
+drop policy if exists "projects update" on projects;
 create policy "projects update" on projects for update using (can_edit_team(team_id));
+drop policy if exists "projects delete" on projects;
 create policy "projects delete" on projects for delete using (is_team_owner(team_id));
 
+drop policy if exists "assets read" on series_assets;
 create policy "assets read" on series_assets for select using (can_read_project(project_id));
+drop policy if exists "assets write" on series_assets;
 create policy "assets write" on series_assets for insert with check (can_write_project(project_id));
+drop policy if exists "assets update" on series_assets;
 create policy "assets update" on series_assets for update using (can_write_project(project_id));
+drop policy if exists "assets delete" on series_assets;
 create policy "assets delete" on series_assets for delete using (can_write_project(project_id));
 
+drop policy if exists "chars read" on characters;
 create policy "chars read" on characters for select using (can_read_project(project_id));
+drop policy if exists "chars write" on characters;
 create policy "chars write" on characters for insert with check (can_write_project(project_id));
+drop policy if exists "chars update" on characters;
 create policy "chars update" on characters for update using (can_write_project(project_id));
+drop policy if exists "chars delete" on characters;
 create policy "chars delete" on characters for delete using (can_write_project(project_id));
 
+drop policy if exists "eps read" on episodes;
 create policy "eps read" on episodes for select using (can_read_project(project_id));
+drop policy if exists "eps write" on episodes;
 create policy "eps write" on episodes for insert with check (can_write_project(project_id));
+drop policy if exists "eps update" on episodes;
 create policy "eps update" on episodes for update using (can_write_project(project_id));
+drop policy if exists "eps delete" on episodes;
 create policy "eps delete" on episodes for delete using (can_write_project(project_id));
 
+drop policy if exists "els read" on elements;
 create policy "els read" on elements for select
   using (exists (select 1 from episodes e where e.id = episode_id and can_read_project(e.project_id)));
+drop policy if exists "els write" on elements;
 create policy "els write" on elements for insert
   with check (exists (select 1 from episodes e where e.id = episode_id and can_write_project(e.project_id)));
+drop policy if exists "els update" on elements;
 create policy "els update" on elements for update
   using (exists (select 1 from episodes e where e.id = episode_id and can_write_project(e.project_id)));
+drop policy if exists "els delete" on elements;
 create policy "els delete" on elements for delete
   using (exists (select 1 from episodes e where e.id = episode_id and can_write_project(e.project_id)));
 
+drop policy if exists "takes read" on takes;
 create policy "takes read" on takes for select
   using (exists (select 1 from elements el join episodes e on e.id = el.episode_id
                  where el.id = element_id and can_read_project(e.project_id)));
+drop policy if exists "takes write" on takes;
 create policy "takes write" on takes for insert
   with check (exists (select 1 from elements el join episodes e on e.id = el.episode_id
                  where el.id = element_id and can_write_project(e.project_id)));
+drop policy if exists "takes delete" on takes;
 create policy "takes delete" on takes for delete
   using (exists (select 1 from elements el join episodes e on e.id = el.episode_id
                  where el.id = element_id and can_write_project(e.project_id)));
 
+drop policy if exists "jobs read" on jobs;
 create policy "jobs read" on jobs for select
   using (exists (select 1 from episodes e where e.id = episode_id and can_read_project(e.project_id)));
+drop policy if exists "jobs write" on jobs;
 create policy "jobs write" on jobs for insert
   with check (exists (select 1 from episodes e where e.id = episode_id and can_write_project(e.project_id)));
+drop policy if exists "jobs update" on jobs;
 create policy "jobs update" on jobs for update
   using (exists (select 1 from episodes e where e.id = episode_id and can_write_project(e.project_id)));
 
@@ -229,11 +272,15 @@ drop policy if exists "own audio write" on storage.objects;
 drop policy if exists "own audio update" on storage.objects;
 drop policy if exists "own audio delete" on storage.objects;
 
+drop policy if exists "team audio read" on storage.objects;
 create policy "team audio read" on storage.objects for select
   using (bucket_id = 'audio' and shares_team_with(((storage.foldername(name))[1])::uuid));
+drop policy if exists "team audio write" on storage.objects;
 create policy "team audio write" on storage.objects for insert
   with check (bucket_id = 'audio' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "team audio update" on storage.objects;
 create policy "team audio update" on storage.objects for update
   using (bucket_id = 'audio' and shares_team_with(((storage.foldername(name))[1])::uuid));
+drop policy if exists "team audio delete" on storage.objects;
 create policy "team audio delete" on storage.objects for delete
   using (bucket_id = 'audio' and shares_team_with(((storage.foldername(name))[1])::uuid));

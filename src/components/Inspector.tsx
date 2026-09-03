@@ -1,7 +1,7 @@
 import { formatMs } from '../lib/parser'
 import { runChecks } from './ExportPanel'
 import { Play as PlayIcon, Upload, Check } from './icons'
-import type { AudioElement, Character, Episode, SeriesAsset, Take } from '../lib/types'
+import type { AudioElement, Character, Episode, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
 interface Props {
   element: (AudioElement & { start_ms: number }) | null
@@ -10,7 +10,7 @@ interface Props {
   assets: SeriesAsset[]
   takes: Take[]
   busy: boolean
-  freezeReady: boolean
+  blocks: SeriesBlock[]
   blockReturnMs: number | null
   pulseCount: number
   // episode summary, shown when nothing is selected
@@ -23,7 +23,7 @@ interface Props {
   onApprove: (take: Take) => void
   onPlayTake: (take: Take) => void
   onPlayElement: () => void
-  onFreeze: () => void
+  onAddBlock: (blockId: string) => void
   onRemoveBlock: (blockId: string) => void
   onAddVault: (assetId: string) => void
   onExport: () => void
@@ -139,10 +139,13 @@ export default function Inspector(p: Props) {
           <div className="ip-section">
             <span className="ip-label">Add here</span>
             <div className="btn-row">
-              <button className="btn" disabled={!p.freezeReady} onClick={p.onFreeze}
-                title={p.freezeReady ? '' : 'Upload the three freeze files to the vault first'}>
-                Wrap in a freeze
-              </button>
+              {p.blocks.length > 0 && (
+                <select className="inline" value=""
+                  onChange={e => { if (e.target.value) { p.onAddBlock(e.target.value); e.target.value = '' } }}>
+                  <option value="">Wrap in…</option>
+                  {p.blocks.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              )}
               <select className="inline" value=""
                 onChange={e => { if (e.target.value) { p.onAddVault(e.target.value); e.target.value = '' } }}>
                 <option value="">From vault</option>

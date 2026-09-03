@@ -33,6 +33,7 @@ export interface Project {
   language: string
   language_code: string
   accent: string
+  dismissed_patterns: string[]
   mix_target_lufs: number
   music_duck_db: number
   style_notes: string
@@ -44,6 +45,8 @@ export interface SeriesAsset {
   kind: string
   name: string
   storage_path: string | null
+  description: string
+  sort: number
   duration_ms: number | null
   pulse_count: number | null
   provider: string | null
@@ -57,6 +60,7 @@ export interface Character {
   id: string
   project_id: string
   name: string
+  description: string
   source: 'catalog' | 'cloned' | 'human'
   voice_id: string | null
   model: string
@@ -68,6 +72,20 @@ export interface Character {
   sample_language: string | null
   consent_url: string | null
   locked: boolean
+}
+
+export interface SeriesBlock {
+  id: string
+  project_id: string
+  name: string
+  description: string
+  entry_asset_id: string | null
+  repeat_asset_id: string | null
+  return_asset_id: string | null
+  repeat_count: number
+  trigger_marker: string
+  trigger_cue: string
+  end_cue: string
 }
 
 export interface Episode {
@@ -91,6 +109,7 @@ export interface AudioElement {
   block_id: string | null
   block_role: BlockRole | null
   block_seq: number
+  auto: boolean
   scene: string
   kind: ElementKind
   character_id: string | null

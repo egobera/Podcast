@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase, callFunction } from '../lib/supabase'
 import { useToast } from './ui'
 import { accentsFor, labelFor } from '../lib/languages'
+import VoiceDesigner from './VoiceDesigner'
 import type { Character, Project } from '../lib/types'
 
 export default function Characters({ project, onChanged }: { project: Project; onChanged: () => void }) {
@@ -13,6 +14,7 @@ export default function Characters({ project, onChanged }: { project: Project; o
   const fileInput = useRef<HTMLInputElement | null>(null)
   const cloneTarget = useRef<string | null>(null)
   const toast = useToast()
+  const [designing, setDesigning] = useState<Character | null>(null)
 
   async function load() {
     const { data } = await supabase.from('characters').select('*').eq('project_id', project.id).order('name')
@@ -91,6 +93,12 @@ export default function Characters({ project, onChanged }: { project: Project; o
               {c.source === 'cloned' ? 'Cloned voice' : c.source === 'human' ? 'Recorded by a person' : 'Catalog voice'}
               {c.voice_id ? ` · ${c.voice_id.slice(0, 10)}` : ' · no voice set'}
             </p>
+            <input
+              className="card-desc"
+              placeholder="Who they are, in one line"
+              defaultValue={c.description}
+              onBlur={e => patch(c.id, { description: e.target.value })}
+            />
             <p>
               {labelFor(project.language_code)} · {c.accent ?? project.accent}
               {c.accent && c.accent !== project.accent && ' · differs from the series'}
@@ -136,6 +144,10 @@ export default function Characters({ project, onChanged }: { project: Project; o
               <button className="btn" data-variant="quiet" onClick={() => setEditing(editing === c.id ? null : c.id)}>
                 {editing === c.id ? 'Done' : 'Settings'}
               </button>
+              <button className="btn" data-variant={!c.voice_id && c.description ? 'primary' : undefined}
+                onClick={() => setDesigning(c)}>
+                {c.description ? 'Design from the script' : 'Design a voice'}
+              </button>
               <button
                 className="btn"
                 disabled={cloning === c.id}
@@ -152,6 +164,19 @@ export default function Characters({ project, onChanged }: { project: Project; o
         ))}
       </div>
 
+      {designing && (
+        <VoiceDesigner
+          characterName={designing.name}
+          languageCode={project.language_code}
+          accent={designing.accent ?? project.accent}
+          fromScript={designing.description ?? ''}
+          onSaved={(voiceId, description) => {
+            patch(designing.id, { voice_id: voiceId, source: 'catalog', description })
+          }}
+          onClose={() => setDesigning(null)}
+        />
+      )}
+
       <input
         ref={fileInput}
         type="file"
@@ -163,6 +188,25 @@ export default function Characters({ project, onChanged }: { project: Project; o
           e.target.value = ''
         }}
       />
+
+      <div className="manual">
+        <h4>Two ways to get a voice, and they answer different questions</h4>
+        <p>
+          <strong>Clone from audio</strong> copies a real person. It reproduces the sample and
+          takes no instructions: you cannot ask a clone to sound older, deeper or calmer. Whatever
+          is in the recording is what you get, for every season.
+        </p>
+        <p>
+          <strong>Design a voice</strong> invents one from a written description, so age, depth,
+          texture and pace are exactly what you ask for. Use it when the voice in your head does
+          not exist yet, or when you want an older grandmother than anyone you can record.
+        </p>
+        <p>
+          If you cloned someone and want them deeper or older, redesigning is the honest route.
+          The other option is changing the recording itself: distance to the microphone, time of
+          day, how tired the speaker is. All of that lands in the clone.
+        </p>
+      </div>
 
       <div className="manual">
         <h4>Record the clone in the language and accent you will publish in</h4>

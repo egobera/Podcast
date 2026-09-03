@@ -96,7 +96,7 @@ function applyGain(buffer: AudioBuffer, gain: number) {
   }
 }
 
-function toWav(buffer: AudioBuffer): Blob {
+export function toWav(buffer: AudioBuffer): Blob {
   const channels = buffer.numberOfChannels
   const frames = buffer.length
   const bytes = 44 + frames * channels * 2

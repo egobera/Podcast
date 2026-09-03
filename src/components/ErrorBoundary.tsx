@@ -49,14 +49,16 @@ export function SetupNeeded({ message }: { message: string }) {
       <div className="auth" style={{ width: 'min(560px, 92vw)' }}>
         <h1>One more migration to run</h1>
         <p>
-          The database is missing something the app needs. Open your Supabase project, go to
-          the SQL editor, and run the migration files in <code>supabase/</code> in order. Any you
-          have already run will do nothing the second time.
+          The database is missing something the app needs, or a migration stopped halfway. Open
+          your Supabase project, go to the SQL editor, and run these files in order. They are safe
+          to run again: anything already in place is left alone.
         </p>
         <ol className="setup-list">
           <li><code>schema.sql</code></li>
           <li><code>migration-002-template-and-blocks.sql</code></li>
           <li><code>migration-003-teams.sql</code></li>
+          <li><code>migration-004-language.sql</code></li>
+          <li><code>migration-005-ensure-team.sql</code></li>
         </ol>
         <pre className="crash">{message}</pre>
         <button className="btn" data-variant="primary" onClick={() => location.reload()}>
