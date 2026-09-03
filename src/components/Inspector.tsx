@@ -1,7 +1,8 @@
 import { formatMs } from '../lib/parser'
 import { runChecks } from './ExportPanel'
 import { Play as PlayIcon, Upload, Check } from './icons'
-import type { AudioElement, Character, Episode, SeriesAsset, SeriesBlock, Take } from '../lib/types'
+import Comments from './Comments'
+import type { AudioElement, Character, Comment, Episode, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
 interface Props {
   element: (AudioElement & { start_ms: number }) | null
@@ -27,6 +28,12 @@ interface Props {
   onRemoveBlock: (blockId: string) => void
   onAddVault: (assetId: string) => void
   onExport: () => void
+  onDeleteEpisode: () => void
+  comments: Comment[]
+  userId: string
+  userEmail: string | null
+  episodeId: string
+  onCommentsChanged: () => void
 }
 
 export default function Inspector(p: Props) {
@@ -106,6 +113,15 @@ export default function Inspector(p: Props) {
         </div>
       )}
 
+      <Comments
+        elementId={el.id}
+        episodeId={p.episodeId}
+        userId={p.userId}
+        userEmail={p.userEmail}
+        comments={p.comments}
+        onChanged={p.onCommentsChanged}
+      />
+
       {!isTemplate && !isBlock && (
         <>
           <div className="ip-section">
@@ -161,7 +177,8 @@ export default function Inspector(p: Props) {
 }
 
 /** What the panel shows when nothing is selected: the state of the episode. */
-function EpisodeSummary({ episode, elements, total, onExport }: Props) {
+function EpisodeSummary(p: Props) {
+  const { episode, elements, total, onExport } = p
   const checks = runChecks(elements, episode, total)
   const byKind = {
     dialogue: elements.filter(e => e.kind === 'dialogue').length,
@@ -216,6 +233,10 @@ function EpisodeSummary({ episode, elements, total, onExport }: Props) {
       </div>
 
       <button className="btn" onClick={onExport}>Export episode</button>
+
+      <button className="btn danger quiet-danger" onClick={p.onDeleteEpisode}>
+        Delete this episode
+      </button>
 
       <p className="notice ip-hint">
         Select a line to work on it, or press <kbd className="key">↓</kbd> to start from the top.

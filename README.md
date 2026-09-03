@@ -55,7 +55,9 @@ Cuando esté listo:
 11. Otra con `supabase/migration-005-ensure-team.sql`
 12. Otra con `supabase/migration-006-flexible-vault.sql`
 13. Otra con `supabase/migration-007-block-triggers.sql`
-14. Y la última, `supabase/migration-008-suggestions.sql`
+14. Otra con `supabase/migration-008-suggestions.sql`
+15. Otra con `supabase/migration-009-autofill-vault.sql`
+16. Y la última, `supabase/migration-010-comments.sql`
 
 El primero crea las tablas, las reglas de seguridad y el almacén de audio. El segundo añade la
 plantilla de episodio, el bloque de congelamiento y los objetivos de duración de 8 minutos. El
@@ -387,6 +389,24 @@ recorrer un episodio entero sin tocar el ratón.
 Arriba hay un filtro segmentado con el recuento de cada estado: todo, lo que falta, lo que espera
 revisión y lo aprobado.
 
+## La bóveda se llena sola
+
+No hay que darla de alta a mano. Al leer un guion pasan tres cosas:
+
+**Se conecta lo que ya existe.** Si el guion pide un timbre y la bóveda ya tiene uno con audio, ese
+elemento queda resuelto sin generar nada. Es el motivo entero de que la bóveda exista: el timbre se
+hace una vez y sirve para las cinco temporadas.
+
+**Se añade lo que se repite.** Cualquier sonido que el guion pida más de una vez entra en la bóveda
+como entrada vacía, esperando audio.
+
+**Se ofrece el resto en un clic.** Los que aparecen una sola vez no se añaden solos, porque una
+mención no demuestra que algo se repita y una bóveda llena de sonidos únicos es una bóveda peor.
+Aparecen agrupados bajo el guion con un botón para meterlos todos.
+
+Las entradas creadas así llevan la etiqueta *script* y muestran cuántas veces se usan. Se pueden
+renombrar, describir o borrar, y no vuelven a aparecer.
+
 ## La bóveda la define cada serie
 
 No hay una lista fija de sonidos. Añades lo que se repita en tus episodios y le pones el nombre que
@@ -501,6 +521,59 @@ direcciones.
 
 El icono es una onda de audio que se detiene: diez barras que suben y bajan, y donde debería estar
 la última hay un hueco. Solo son barras verticales, así que se sigue leyendo a 16 píxeles en el Dock.
+
+## Notas en una línea
+
+Cualquiera del equipo puede dejar una nota sobre una línea concreta, y es **lo único que un viewer
+puede escribir**. Un revisor que solo escucha no sirve de nada si no tiene forma de decir que la
+línea 47 va demasiado rápida.
+
+Las líneas con notas abiertas llevan un contador junto al timecode, así que se localizan sin
+buscar. Las notas se marcan como resueltas en vez de borrarse, y quedan ocultas hasta que pides
+verlas. Solo su autor puede borrar la suya.
+
+`Cmd + Enter` guarda la nota sin soltar el teclado.
+
+## Movimiento
+
+El movimiento aparece solo donde explica algo, y siempre con la misma curva y duraciones cortas.
+`prefers-reduced-motion` se respeta en todas partes, incluidas las animaciones hechas en
+JavaScript.
+
+**El ripple se ve viajar.** Al aprobar una toma más larga, los clips posteriores se deslizan a su
+nueva posición en un tercio de segundo en lugar de saltar. Saltando, el ojo no entiende qué pasó;
+deslizándose, ves recorrer el episodio al desplazamiento que acabas de provocar.
+
+**El cursor de reproducción no pasa por React.** Se escribe directo al DOM con `transform`, sesenta
+veces por segundo. Si pasara por el estado, cada fotograma repintaría la línea de tiempo y las
+ciento y pico filas del guion, y una línea suave se convertiría en una línea a saltos. El contador
+numérico, que no lo necesita, se actualiza diez veces por segundo.
+
+**Navegar con el teclado no pelea con el scroll.** Manteniendo pulsada una flecha, los
+desplazamientos suaves se encolan más rápido de lo que pueden terminar y la página se queda medio
+pantallazo por detrás del cursor. Por debajo de un cuarto de segundo entre movimientos, salta en
+lugar de deslizarse.
+
+**Las filas recién añadidas se marcan.** Insertar un bloque añade trece elementos de golpe. Se
+tiñen un segundo y medio y sueltan el color, lo justo para encontrarlas sin que se convierta en
+decoración.
+
+## Tests
+
+```bash
+npm test          # ejecuta la batería
+npm run test:watch
+npm run typecheck # incluye los tests, que el build excluye
+```
+
+Hay 37 tests sobre las tres piezas donde han aparecido todos los fallos reales de este proyecto:
+el parser de guiones, el motor de posicionamiento y la detección de patrones.
+
+Cada uno cubre un error que ocurrió de verdad. Por ejemplo, que las acotaciones se colaran en el
+texto hablado, o que el cierre de un congelamiento se emparejara con la apertura del siguiente
+creando un bloque fantasma. Escribiendo esta batería aparecieron dos fallos más que estaban en el
+código: las etiquetas `<break>` contaban como palabras al estimar la duración, y ese emparejamiento
+cruzado entre bloques consecutivos.
 
 ## Problemas frecuentes
 

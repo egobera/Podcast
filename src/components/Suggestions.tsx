@@ -3,7 +3,8 @@ import { supabase } from '../lib/supabase'
 import { detectRepeats, detectPairs, cueKeyword, type CueLike } from '../lib/detect'
 import { useToast } from './ui'
 import { Plus, Close } from './icons'
-import type { Project } from '../lib/types'
+import type { AudioElement, Project, SeriesAsset } from '../lib/types'
+import { addAllCues, countUnlinked } from '../lib/autofill'
 
 /**
  * Proposes, never acts.
@@ -13,12 +14,15 @@ import type { Project } from '../lib/types'
  * several episodes, which is the stronger signal even when no single script repeats it.
  */
 export default function Suggestions({
-  project, elements, scope, onApplied,
+  project, elements, scope, onApplied, fullElements, assets,
 }: {
   project: Project
   elements: CueLike[]
   scope: 'episode' | 'series'
   onApplied: () => void
+  /** Only for the episode layer: the real elements, so the rest can be added in one go. */
+  fullElements?: AudioElement[]
+  assets?: SeriesAsset[]
 }) {
   const [busy, setBusy] = useState<string | null>(null)
   const [hidden, setHidden] = useState<string[]>([])
@@ -45,7 +49,9 @@ export default function Suggestions({
     [elements, scope, dismissed],
   )
 
-  if (repeats.length === 0 && pairs.length === 0) return null
+  const unlinked = fullElements && assets ? countUnlinked(fullElements, assets) : 0
+
+  if (repeats.length === 0 && pairs.length === 0 && unlinked === 0) return null
 
   async function dismiss(key: string) {
     setHidden(h => [...h, key])
@@ -116,6 +122,30 @@ export default function Suggestions({
           </button>
         </div>
       ))}
+
+      {unlinked > 0 && fullElements && (
+        <div className="sugg">
+          <div className="sugg-main">
+            <span className="sugg-title">
+              {unlinked} more sounds this episode needs
+            </span>
+            <span className="sugg-body">
+              They appear once each, so they were not added on their own. Put them in the vault and
+              any later episode that asks for the same thing gets them for free.
+            </span>
+          </div>
+          <button className="btn" disabled={busy === 'all'}
+            onClick={async () => {
+              setBusy('all')
+              const n = await addAllCues(project.id, fullElements)
+              setBusy(null)
+              onApplied()
+              toast(`${n} sounds added to the vault.`)
+            }}>
+            <Plus size={13} /> Add them all
+          </button>
+        </div>
+      )}
 
       {repeats.map(r => (
         <div className="sugg" key={r.key}>

@@ -33,9 +33,15 @@ export interface ParsedElement {
 const WPM = 135
 
 export function estimateSpeechMs(text: string): number {
-  const words = text.trim().split(/\s+/).filter(Boolean).length
   const breaks = [...text.matchAll(/<break\s+time="([\d.]+)s"/g)]
     .reduce((sum, m) => sum + parseFloat(m[1]) * 1000, 0)
+
+  // The tags themselves are not spoken, so they must come out before words are counted.
+  const spoken = text
+    .replace(/<break\s+time="[\d.]+s"\s*\/>/g, ' ')
+    .replace(/\[[a-z ]+\]/gi, ' ')
+  const words = spoken.trim().split(/\s+/).filter(Boolean).length
+
   return Math.round((words / WPM) * 60000 + breaks)
 }
 

@@ -125,6 +125,46 @@ export function Confirm({
   )
 }
 
+/**
+ * Deleting something with a lot inside it should take a moment of deliberate effort.
+ * Typing the name is that moment: it is impossible to do by accident.
+ */
+export function ConfirmTyped({
+  title, body, phrase, confirmLabel, onConfirm, onClose,
+}: {
+  title: string
+  body: ReactNode
+  phrase: string
+  confirmLabel: string
+  onConfirm: () => void
+  onClose: () => void
+}) {
+  const [typed, setTyped] = useState('')
+  const ok = typed.trim().toLowerCase() === phrase.trim().toLowerCase()
+  return (
+    <Modal
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="btn" data-variant="quiet" onClick={onClose}>Cancel</button>
+          <button className="btn danger" disabled={!ok}
+            onClick={() => { onConfirm(); onClose() }}>
+            {confirmLabel}
+          </button>
+        </>
+      }
+    >
+      {body}
+      <div className="field">
+        <label>Type <strong>{phrase}</strong> to confirm</label>
+        <input value={typed} onChange={e => setTyped(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && ok) { onConfirm(); onClose() } }} />
+      </div>
+    </Modal>
+  )
+}
+
 /* ---------- keyboard hint ---------- */
 
 export function Keys({ children }: { children: string }) {

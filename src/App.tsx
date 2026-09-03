@@ -26,6 +26,7 @@ export default function App() {
 
 function Workspace() {
   const [userId, setUserId] = useState<string | null>(null)
+  const [userEmail, setUserEmail] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
   const [recovering, setRecovering] = useState(false)
   const [teams, setTeams] = useState<Team[]>([])
@@ -44,10 +45,12 @@ function Workspace() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setUserId(data.session?.user.id ?? null)
+      setUserEmail(data.session?.user.email ?? null)
       setReady(true)
     })
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       setUserId(session?.user.id ?? null)
+      setUserEmail(session?.user.email ?? null)
       // Arriving from a reset link signs the user in, then asks for the new password.
       if (event === 'PASSWORD_RECOVERY') setRecovering(true)
     })
@@ -140,7 +143,7 @@ function Workspace() {
 
   async function createEpisode(title: string) {
     if (!project) return
-    const number = episodes.length + 1
+    const number = episodes.reduce((n, e) => Math.max(n, e.number), 0) + 1
     const { data, error } = await supabase.from('episodes').insert({
       project_id: project.id, number, title,
       target_min_ms: 420000, target_max_ms: 540000,
@@ -251,6 +254,7 @@ function Workspace() {
             onOpenProject={openProject}
             onOpenEpisode={openEpisode}
             onNewProject={() => setAsk('series')}
+            onDeleted={() => { loadProjects(); setView({ kind: 'library' }) }}
           />
         )}
 
@@ -269,10 +273,29 @@ function Workspace() {
           </div>
         )}
 
-        {project && view.kind === 'vault' && <Vault project={project} userId={userId} onChanged={loadSeries} />}
+        {project && view.kind === 'vault' && (
+          <Vault
+            project={project}
+            userId={userId}
+            canDelete={myRole === 'owner'}
+            onChanged={loadSeries}
+            onDeleted={async () => {
+              setProjectId(null)
+              setView({ kind: 'library' })
+              await loadProjects()
+            }}
+          />
+        )}
         {project && view.kind === 'characters' && <Characters project={project} onChanged={loadSeries} />}
         {project && episode && (
-          <EpisodeView key={episode.id} project={project} episode={episode} userId={userId} />
+          <EpisodeView
+            key={episode.id}
+            project={project}
+            episode={episode}
+            userId={userId}
+            userEmail={userEmail}
+            onDeleted={async () => { setView({ kind: 'vault' }); await loadSeries() }}
+          />
         )}
       </main>
 
@@ -285,7 +308,8 @@ function Workspace() {
           onSubmit={createProject} onClose={() => setAsk(null)} />
       )}
       {ask === 'episode' && (
-        <AskText title="New episode" label="Episode title" initial={`Episode ${episodes.length + 1}`}
+        <AskText title="New episode" label="Episode title"
+          initial={`Episode ${episodes.reduce((n, e) => Math.max(n, e.number), 0) + 1}`}
           submitLabel="Create" onSubmit={createEpisode} onClose={() => setAsk(null)} />
       )}
     </div>

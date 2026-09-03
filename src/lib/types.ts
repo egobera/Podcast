@@ -47,6 +47,9 @@ export interface SeriesAsset {
   storage_path: string | null
   description: string
   sort: number
+  auto: boolean
+  match_key: string | null
+  uses: number
   duration_ms: number | null
   pulse_count: number | null
   provider: string | null
@@ -123,6 +126,17 @@ export interface AudioElement {
   gain_role: GainRole
   status: ElementStatus
   approved_take_id: string | null
+}
+
+export interface Comment {
+  id: string
+  element_id: string
+  episode_id: string
+  author: string
+  author_email: string | null
+  body: string
+  resolved: boolean
+  created_at: string
 }
 
 export interface Take {

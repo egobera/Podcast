@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase, uploadAudio, readDuration, signedUrl } from '../lib/supabase'
 import { formatMs } from '../lib/parser'
 import { LANGUAGES, accentsFor } from '../lib/languages'
-import { useToast, AskText, Confirm } from './ui'
+import { useToast, AskText, Confirm, ConfirmTyped } from './ui'
 import { Play, Upload, Plus, Close } from './icons'
 import TrimEditor from './TrimEditor'
 import ManualNote from './ManualNote'
@@ -19,11 +19,13 @@ const SUGGESTIONS = [
 ]
 
 export default function Vault({
-  project, userId, onChanged,
+  project, userId, canDelete, onChanged, onDeleted,
 }: {
   project: Project
   userId: string
+  canDelete: boolean
   onChanged: () => void
+  onDeleted: () => void
 }) {
   const [assets, setAssets] = useState<SeriesAsset[]>([])
   const [blocks, setBlocks] = useState<SeriesBlock[]>([])
@@ -32,6 +34,7 @@ export default function Vault({
   const [addingBlock, setAddingBlock] = useState(false)
   const [trim, setTrim] = useState<SeriesAsset | null>(null)
   const [seriesCues, setSeriesCues] = useState<CueLike[]>([])
+  const [deleting, setDeleting] = useState(false)
   const [remove, setRemove] = useState<SeriesAsset | null>(null)
   const inputs = useRef<Record<string, HTMLInputElement | null>>({})
   const toast = useToast()
@@ -122,7 +125,9 @@ export default function Vault({
     <div className="page">
       <h2>Series vault</h2>
       <p className="lede">
-        Audio that belongs to the whole series, not to one episode. You decide what goes here.
+        Audio that belongs to the whole series, not to one episode. It fills itself as you read
+        scripts: anything a script needs more than once lands here, and anything already here gets
+        connected automatically the next time an episode asks for it.
         {assets.length > 0 && ` ${withAudio} of ${assets.length} filled.`}
       </p>
 
@@ -158,6 +163,7 @@ export default function Vault({
           <div className="card" key={asset.id}>
             <div className="card-head">
               <h3>{asset.name}</h3>
+              {asset.auto && <span className="from-script" title="Added from a script">script</span>}
               <button className="icon-btn" aria-label="Remove" onClick={() => setRemove(asset)}>
                 <Close size={13} />
               </button>
@@ -169,6 +175,9 @@ export default function Vault({
               defaultValue={asset.description}
               onBlur={e => patch(asset.id, { description: e.target.value })}
             />
+            {asset.uses > 0 && (
+              <span className="uses tnum">used {asset.uses} {asset.uses === 1 ? 'time' : 'times'}</span>
+            )}
 
             <label className="auto-place">
               <select value={asset.auto_place ?? 'none'}
@@ -308,6 +317,19 @@ export default function Vault({
         onApplied={() => { load(); onChanged() }}
       />
 
+      {canDelete && (
+        <section className="danger-zone">
+          <span className="ip-label">Delete this series</span>
+          <p className="notice">
+            Everything goes: every episode, every script, every take and the whole vault. There is
+            no undo and nobody on the team can get it back.
+          </p>
+          <button className="btn danger" onClick={() => setDeleting(true)}>
+            Delete {project.name}
+          </button>
+        </section>
+      )}
+
       <ManualNote topic="theme-cut" />
       <ManualNote topic="reverse-reverb" />
 
@@ -331,6 +353,38 @@ export default function Vault({
           onClose={() => setTrim(null)}
         />
       )}
+      {deleting && (
+        <ConfirmTyped
+          title={`Delete ${project.name}`}
+          phrase={project.name}
+          confirmLabel="Delete the series"
+          onClose={() => setDeleting(false)}
+          onConfirm={async () => {
+            // Audio files are removed first, while we still know where they live.
+            const { data: files } = await supabase.storage.from('audio').list(`${userId}/${project.id}`)
+            if (files?.length) {
+              await supabase.storage.from('audio')
+                .remove(files.map(f => `${userId}/${project.id}/${f.name}`))
+            }
+            const { error } = await supabase.from('projects').delete().eq('id', project.id)
+            if (error) { toast(error.message, 'bad'); return }
+            toast(`${project.name} is gone.`)
+            onDeleted()
+          }}
+          body={
+            <>
+              <p>
+                This removes every episode of {project.name}, every take you approved, the vault
+                and the voices set up for it.
+              </p>
+              <p className="notice">
+                The voices themselves stay in your ElevenLabs account. Only the link to them goes.
+              </p>
+            </>
+          }
+        />
+      )}
+
       {remove && (
         <Confirm
           title={`Remove ${remove.name}`}

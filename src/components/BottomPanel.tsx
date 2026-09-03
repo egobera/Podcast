@@ -56,6 +56,21 @@ export default function BottomPanel({
   const raf = useRef(0)
   const laneArea = useRef<HTMLDivElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
+  const playhead = useRef<HTMLDivElement>(null)
+  const lastRead = useRef(0)
+
+  /**
+   * The playhead is written straight to the DOM sixty times a second. Routing it through
+   * React would re-render a canvas and a hundred rows for every frame, which is how a
+   * smooth line turns into a stuttering one. The time readout only needs ten updates a
+   * second, so that is all it gets.
+   */
+  const moveHead = useCallback((ms: number) => {
+    const el = playhead.current
+    if (el) el.style.transform = `translateX(${(ms / Math.max(total, 1)) * widthRef.current}px)`
+  }, [total])
+  const widthRef = useRef(800)
+  widthRef.current = width
 
   useEffect(() => () => { player.current?.destroy(); cancelAnimationFrame(raf.current) }, [])
 
@@ -68,13 +83,58 @@ export default function BottomPanel({
     return () => ro.disconnect()
   }, [collapsed])
 
+  /**
+   * Positions are tweened, not read straight from the data.
+   *
+   * Approving a take that runs a second longer moves everything after it. Snapping to the
+   * new layout leaves the eye with no idea what happened; sliding it over a third of a
+   * second shows the ripple travelling down the episode, which is exactly what did happen.
+   */
+  const shown = useRef(new Map<string, number>())
+  const tween = useRef(0)
+
+  useEffect(() => {
+    const target = new Map(elements.map(e => [e.id, e.start_ms]))
+    const from = new Map(shown.current)
+
+    // Anything new starts where it belongs; only moves are animated.
+    let moves = 0
+    for (const [id, to] of target) {
+      if (!from.has(id)) { shown.current.set(id, to); continue }
+      if (Math.abs(from.get(id)! - to) > 1) moves++
+    }
+    for (const id of [...shown.current.keys()]) if (!target.has(id)) shown.current.delete(id)
+
+    // Someone who has asked for less motion gets the new layout immediately.
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    if (moves === 0 || still) { shown.current = target; draw(); return }
+
+    const started = performance.now()
+    const DURATION = 320
+    cancelAnimationFrame(tween.current)
+
+    const step = () => {
+      const t = Math.min((performance.now() - started) / DURATION, 1)
+      const eased = 1 - Math.pow(1 - t, 3)
+      for (const [id, to] of target) {
+        const start = from.get(id) ?? to
+        shown.current.set(id, start + (to - start) * eased)
+      }
+      draw()
+      if (t < 1) tween.current = requestAnimationFrame(step)
+    }
+    tween.current = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(tween.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elements])
+
   /** Clips drawn from the script even before any audio has been decoded. */
   const drawable = elements
     .filter(e => e.block_role !== 'pulse' || true)
     .map(e => ({
       id: e.id,
       lane: laneOf(roleOf(e)),
-      startMs: e.start_ms,
+      startMs: shown.current.get(e.id) ?? e.start_ms,
       durationMs: e.duration_ms,
       url: clips.find(c => c.id === e.id)?.url,
       ready: e.status === 'approved' || !!e.series_asset_id,
@@ -146,10 +206,16 @@ export default function BottomPanel({
   }, [width, total, drawable, muted, soloed, selectedId])
 
   useEffect(() => { draw() })
+  useEffect(() => { moveHead(head) }, [width, collapsed, moveHead, head])
 
   function tick() {
     const ms = player.current?.currentMs ?? 0
-    setHead(ms)
+    moveHead(ms)
+    // The number on screen does not need sixty updates a second; the line does.
+    if (ms - lastRead.current > 100 || ms < lastRead.current) {
+      lastRead.current = ms
+      setHead(ms)
+    }
     if (ms >= total) { pause(); return }
     raf.current = requestAnimationFrame(tick)
   }
@@ -182,6 +248,8 @@ export default function BottomPanel({
   function seek(ms: number) {
     const clamped = Math.max(0, Math.min(ms, total))
     setHead(clamped)
+    lastRead.current = clamped
+    moveHead(clamped)
     player.current?.seek(clamped)
   }
 
@@ -314,7 +382,7 @@ export default function BottomPanel({
               ))}
             </div>
             <canvas ref={canvas} className="lane-canvas" />
-            <div className="playhead" style={{ left: `${Math.min((head / span) * 100, 100)}%` }} />
+            <div className="playhead" ref={playhead} style={{ left: 0 }} />
           </div>
         </div>
       )}

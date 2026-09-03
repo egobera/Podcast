@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { supabase, callFunction } from '../lib/supabase'
 import { useToast } from './ui'
 import { accentsFor, labelFor } from '../lib/languages'
+import { parseCast } from '../lib/parser'
 import VoiceDesigner from './VoiceDesigner'
 import type { Character, Project } from '../lib/types'
 
@@ -15,6 +16,7 @@ export default function Characters({ project, onChanged }: { project: Project; o
   const cloneTarget = useRef<string | null>(null)
   const toast = useToast()
   const [designing, setDesigning] = useState<Character | null>(null)
+  const [filling, setFilling] = useState(false)
 
   async function load() {
     const { data } = await supabase.from('characters').select('*').eq('project_id', project.id).order('name')
@@ -33,6 +35,52 @@ export default function Characters({ project, onChanged }: { project: Project; o
     await supabase.from('characters').update(fields).eq('id', id)
     load()
     onChanged()
+  }
+
+  /**
+   * Pulls the cast list out of every script in the series and fills in the descriptions.
+   *
+   * Runs across all episodes, not just one, because a character introduced in episode four
+   * is often described there and nowhere else. A description someone has already written
+   * is never touched.
+   */
+  async function fillFromScripts() {
+    setFilling(true)
+    try {
+      const { data: eps } = await supabase.from('episodes')
+        .select('script_text').eq('project_id', project.id).order('number')
+
+      const described = new Map<string, string>()
+      for (const ep of eps ?? []) {
+        for (const entry of parseCast(ep.script_text ?? '')) {
+          if (entry.description && !described.has(entry.name)) {
+            described.set(entry.name, entry.description)
+          }
+        }
+      }
+
+      if (described.size === 0) {
+        toast('No cast list found in the scripts. Add a table or a dash list of characters.', 'bad')
+        return
+      }
+
+      let filled = 0
+      for (const c of chars) {
+        const description = described.get(c.name)
+        if (description && !c.description?.trim()) {
+          await supabase.from('characters').update({ description }).eq('id', c.id)
+          filled++
+        }
+      }
+
+      await load()
+      onChanged()
+      toast(filled > 0
+        ? `${filled} ${filled === 1 ? 'description' : 'descriptions'} taken from the scripts.`
+        : 'Every character already had a description.')
+    } finally {
+      setFilling(false)
+    }
   }
 
   async function clone(charId: string, file: File) {
@@ -65,7 +113,8 @@ export default function Characters({ project, onChanged }: { project: Project; o
       <h2>Characters</h2>
       <p className="lede">
         A character is a locked preset, not just a voice. Voice, model and settings travel together,
-        so a line generated in season three sounds like the same person as episode one.
+        so a line generated in season three sounds like the same person as episode one. If your
+        scripts carry a cast list, the descriptions come straight from them.
       </p>
 
       <div className="btn-row" style={{ marginBottom: 24 }}>
@@ -77,6 +126,10 @@ export default function Characters({ project, onChanged }: { project: Project; o
           style={{ border: '1px solid var(--rule)', borderRadius: 5, padding: '7px 10px' }}
         />
         <button className="btn" onClick={add}>Add character</button>
+        <button className="btn" data-variant={chars.some(c => !c.description?.trim()) ? 'primary' : undefined}
+          disabled={filling || chars.length === 0} onClick={fillFromScripts}>
+          {filling ? 'Reading the scripts' : 'Fill from the scripts'}
+        </button>
       </div>
 
       {error && <p className="error">{error}</p>}

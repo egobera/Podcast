@@ -1,0 +1,172 @@
+import { supabase } from './supabase'
+import { normalize, isTimingOnly } from './detect'
+import type { AudioElement, SeriesAsset } from './types'
+
+/**
+ * Fills the vault from a script, and connects what is already in it.
+ *
+ * Two things happen every time a script is read:
+ *
+ *   1. Any sound the script asks for that the vault already has is linked straight to it.
+ *      A doorbell made once in episode one is done for every episode after it.
+ *   2. Anything new that repeats, inside this episode or across the series, is added to
+ *      the vault as an empty entry, so it appears in the list waiting for audio instead of
+ *      hiding inside one episode.
+ *
+ * Entries created here are flagged automatic. A person can rename, describe or delete them
+ * and nothing will put them back.
+ */
+
+/** Cues too generic to be worth a vault entry of their own. */
+const TOO_GENERIC = /^(pausa|silencio|sonido|ambiente|musica|music|beat)$/
+
+export interface AutofillResult {
+  linked: number
+  created: number
+}
+
+export async function autofillVault(
+  projectId: string,
+  episodeElements: AudioElement[],
+): Promise<AutofillResult> {
+  const { data: existing } = await supabase.from('series_assets')
+    .select('*').eq('project_id', projectId)
+  const assets = (existing ?? []) as SeriesAsset[]
+
+  const byKey = new Map<string, SeriesAsset>()
+  for (const a of assets) {
+    const key = a.match_key ?? normalize(a.name)
+    if (key) byKey.set(key, a)
+  }
+
+  const cues = episodeElements.filter(e =>
+    e.kind !== 'dialogue' && !e.series_asset_id && e.text_content.trim().length > 2)
+
+  // Group this episode's cues by their normalized wording.
+  const groups = new Map<string, { label: string; elements: AudioElement[] }>()
+  for (const cue of cues) {
+    const key = normalize(cue.text_content)
+    if (!key || TOO_GENERIC.test(key) || isTimingOnly(cue.text_content)) continue
+    if (!groups.has(key)) groups.set(key, { label: cue.text_content.trim(), elements: [] })
+    groups.get(key)!.elements.push(cue)
+  }
+
+  let created = 0
+  let linked = 0
+  let sort = assets.length
+
+  for (const [key, group] of groups) {
+    let asset = byKey.get(key)
+
+    // New, and worth keeping: it repeats in this episode.
+    if (!asset && group.elements.length >= 2) {
+      const { data } = await supabase.from('series_assets').insert({
+        project_id: projectId,
+        name: group.label.replace(/[.!?]+$/, '').slice(0, 48),
+        kind: 'sfx',
+        auto_place: 'none',
+        auto: true,
+        match_key: key,
+        description: `From the script. Needed ${group.elements.length} times.`,
+        sort: sort++,
+      }).select().single()
+      if (data) { asset = data as SeriesAsset; byKey.set(key, asset); created++ }
+    }
+
+    if (!asset) continue
+
+    // Point the episode at the vault entry. If it already has audio, the work is done.
+    const ids = group.elements.map(e => e.id)
+    const ready = !!asset.storage_path
+    await supabase.from('elements').update({
+      series_asset_id: asset.id,
+      ...(ready ? { status: 'approved', duration_ms: asset.duration_ms ?? 3000 } : {}),
+    }).in('id', ids)
+
+    await supabase.from('series_assets')
+      .update({ uses: (asset.uses ?? 0) + ids.length }).eq('id', asset.id)
+
+    linked += ids.length
+  }
+
+  return { linked, created }
+}
+
+/** The two entries practically every series has, created once so the vault is never empty. */
+export async function seedVault(projectId: string) {
+  const { count } = await supabase.from('series_assets')
+    .select('id', { count: 'exact', head: true }).eq('project_id', projectId)
+  if ((count ?? 0) > 0) return 0
+
+  await supabase.from('series_assets').insert([
+    {
+      project_id: projectId, name: 'Opening theme', kind: 'theme_open',
+      auto_place: 'open', auto: true, sort: 0,
+      description: 'Plays at the start of every episode.',
+    },
+    {
+      project_id: projectId, name: 'Closing theme', kind: 'theme_close',
+      auto_place: 'close', auto: true, sort: 1,
+      description: 'Plays at the end of every episode.',
+    },
+  ])
+  return 2
+}
+
+/**
+ * Everything the script asks for that is not in the vault yet, including the sounds that
+ * appear only once. Offered as one action rather than done automatically: a single mention
+ * is not evidence that something recurs, and a vault full of one-offs is a worse vault.
+ */
+export async function addAllCues(
+  projectId: string,
+  episodeElements: AudioElement[],
+): Promise<number> {
+  const { data: existing } = await supabase.from('series_assets')
+    .select('id, name, match_key').eq('project_id', projectId)
+  const known = new Set((existing ?? []).map(a => a.match_key ?? normalize(a.name)))
+
+  const groups = new Map<string, { label: string; ids: string[] }>()
+  for (const cue of episodeElements) {
+    if (cue.kind === 'dialogue' || cue.series_asset_id) continue
+    const key = normalize(cue.text_content)
+    if (!key || known.has(key) || TOO_GENERIC.test(key) || isTimingOnly(cue.text_content)) continue
+    if (!groups.has(key)) groups.set(key, { label: cue.text_content.trim(), ids: [] })
+    groups.get(key)!.ids.push(cue.id)
+  }
+  if (groups.size === 0) return 0
+
+  const rows = [...groups.entries()].map(([key, g], i) => ({
+    project_id: projectId,
+    name: g.label.replace(/[.!?]+$/, '').slice(0, 48),
+    kind: 'sfx',
+    auto_place: 'none',
+    auto: true,
+    match_key: key,
+    description: 'From the script.',
+    uses: g.ids.length,
+    sort: 100 + i,
+  }))
+
+  const { data: made } = await supabase.from('series_assets').insert(rows).select()
+  for (const asset of (made ?? [])) {
+    const group = groups.get(asset.match_key as string)
+    if (group) {
+      await supabase.from('elements').update({ series_asset_id: asset.id }).in('id', group.ids)
+    }
+  }
+  return rows.length
+}
+
+/** How many cues an episode has that the vault does not know about yet. */
+export function countUnlinked(episodeElements: AudioElement[], assets: SeriesAsset[]): number {
+  const known = new Set(assets.map(a => a.match_key ?? normalize(a.name)))
+  const keys = new Set<string>()
+  for (const cue of episodeElements) {
+    if (cue.kind === 'dialogue' || cue.series_asset_id) continue
+    const key = normalize(cue.text_content)
+    if (!key || known.has(key) || TOO_GENERIC.test(key) || isTimingOnly(cue.text_content)) continue
+    keys.add(key)
+  }
+  return keys.size
+}

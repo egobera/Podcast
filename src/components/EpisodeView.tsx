@@ -9,25 +9,30 @@ import ManualNote from './ManualNote'
 import Inspector from './Inspector'
 import Suggestions from './Suggestions'
 import BottomPanel from './BottomPanel'
-import { Confirm, Keys, useToast } from './ui'
+import { Confirm, ConfirmTyped, Keys, useToast } from './ui'
+import { deleteEpisode } from '../lib/deletion'
+import { autofillVault, seedVault } from '../lib/autofill'
 import ExportPanel from './ExportPanel'
 import { Play as PlayIcon, Check as CheckIcon } from './icons'
 import type { Clip } from '../lib/player'
-import type { AudioElement, Character, Episode, Job, Project, SeriesAsset, SeriesBlock, Take } from '../lib/types'
+import type { AudioElement, Character, Comment, Episode, Job, Project, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
 const COST_PER_ELEMENT = 0.04
 
 export default function EpisodeView({
-  project, episode, userId,
+  project, episode, userId, userEmail, onDeleted,
 }: {
   project: Project
   episode: Episode
   userId: string
+  userEmail: string | null
+  onDeleted: () => void
 }) {
   const [elements, setElements] = useState<AudioElement[]>([])
   const [chars, setChars] = useState<Character[]>([])
   const [assets, setAssets] = useState<SeriesAsset[]>([])
   const [blocks, setBlocks] = useState<SeriesBlock[]>([])
+  const [comments, setComments] = useState<Comment[]>([])
   const [takes, setTakes] = useState<Record<string, Take[]>>({})
   const [selected, setSelected] = useState<string | null>(null)
   const [script, setScript] = useState(episode.script_text ?? '')
@@ -39,22 +44,27 @@ export default function EpisodeView({
   const [cursor, setCursor] = useState(0)
   const [askGenerate, setAskGenerate] = useState<number | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  /** Rows added by a block or the vault, marked briefly so the eye can find them. */
+  const [justAdded, setJustAdded] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState<'all' | 'todo' | 'review' | 'done'>('all')
   const toast = useToast()
   const uploadInput = useRef<HTMLInputElement | null>(null)
   const uploadTarget = useRef<string | null>(null)
 
   const load = useCallback(async () => {
-    const [{ data: els }, { data: cs }, { data: sa }, { data: bl }] = await Promise.all([
+    const [{ data: els }, { data: cs }, { data: sa }, { data: bl }, { data: cm }] = await Promise.all([
       supabase.from('elements').select('*').eq('episode_id', episode.id).order('idx'),
       supabase.from('characters').select('*').eq('project_id', project.id),
       supabase.from('series_assets').select('*').eq('project_id', project.id),
       supabase.from('series_blocks').select('*').eq('project_id', project.id),
+      supabase.from('comments').select('*').eq('episode_id', episode.id).order('created_at'),
     ])
     setElements((els ?? []) as AudioElement[])
     setChars((cs ?? []) as Character[])
     setAssets((sa ?? []) as SeriesAsset[])
     setBlocks((bl ?? []) as SeriesBlock[])
+    setComments((cm ?? []) as Comment[])
   }, [episode.id, project.id])
 
   useEffect(() => { load(); setScript(episode.script_text ?? '') }, [load, episode.id])
@@ -149,8 +159,15 @@ export default function EpisodeView({
       const { data: inserted } = await supabase.from('elements').insert(rows).select()
       await supabase.from('episodes').update({ script_text: script }).eq('id', episode.id)
 
+      const fresh = (inserted ?? []) as AudioElement[]
+
       // Now place the blocks the script asked for.
-      const placed = await applyAutoBlocks((inserted ?? []) as AudioElement[], marks)
+      const placed = await applyAutoBlocks(fresh, marks)
+
+      // And fill the vault: link what it already has, add what this script needs.
+      await seedVault(project.id)
+      const filled = await autofillVault(project.id, fresh)
+
       await load()
 
       const carried = rows.filter(r => r.status === 'approved').length
@@ -160,6 +177,8 @@ export default function EpisodeView({
         if (kept - carried > 0) bits.push(`${kept - carried} lines changed and need a new take`)
       }
       if (placed > 0) bits.push(`${placed} ${placed === 1 ? 'block' : 'blocks'} placed automatically`)
+      if (filled.linked > 0) bits.push(`${filled.linked} sounds linked to the vault`)
+      if (filled.created > 0) bits.push(`${filled.created} new vault entries`)
       if (bits.length) setNotice(bits.join('. ') + '.')
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Import failed')
@@ -211,11 +230,19 @@ export default function EpisodeView({
     return count
   }
 
+  function flag(ids: string[]) {
+    setJustAdded(new Set(ids))
+    setTimeout(() => setJustAdded(new Set()), 1400)
+  }
+
   async function addBlockAround(el: AudioElement, blockId: string) {
     const block = blocks.find(b => b.id === blockId)
     if (!block) return
     try {
+      const before = new Set(elements.map(e => e.id))
       await insertBlock(episode.id, block, assets, el)
+      const { data } = await supabase.from('elements').select('id').eq('episode_id', episode.id)
+      flag((data ?? []).map(r => r.id).filter(id => !before.has(id)))
       await load()
       toast(`${block.name} wrapped around that line. The repeats spread across it and move with it.`)
     } catch (e) {
@@ -274,7 +301,7 @@ export default function EpisodeView({
     setCursor(target)
     setSelected(el.id)
     loadTakes(el.id)
-    document.getElementById(`row-${el.id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    reveal(el.id)
   }
 
   async function uploadOwn(elementId: string, file: File) {
@@ -393,6 +420,27 @@ export default function EpisodeView({
     : null
   const pulseCount = blockPulses.length
 
+  /**
+   * Held arrow keys queue up smooth scrolls faster than they can finish, and the page ends
+   * up trailing the cursor by half a screen. Anything under a quarter of a second after
+   * the last move jumps instead.
+   */
+  const lastMove = useRef(0)
+  function reveal(id: string) {
+    const now = performance.now()
+    const fast = now - lastMove.current < 250
+    lastMove.current = now
+    document.getElementById(`row-${id}`)?.scrollIntoView({
+      block: 'center',
+      behavior: fast ? 'auto' : 'smooth',
+    })
+  }
+
+  const openNotes = new Map<string, number>()
+  for (const c of comments) {
+    if (!c.resolved) openNotes.set(c.element_id, (openNotes.get(c.element_id) ?? 0) + 1)
+  }
+
   const scriptCount = elements.filter(e => e.origin === 'script').length
 
   /**
@@ -411,8 +459,7 @@ export default function EpisodeView({
         setCursor(next)
         setSelected(visible[next].id)
         loadTakes(visible[next].id)
-        document.getElementById(`row-${visible[next].id}`)
-          ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        reveal(visible[next].id)
       }
 
       if (e.key === 'ArrowDown' || e.key === 'j') return move(1)
@@ -531,6 +578,7 @@ export default function EpisodeView({
                 data-kind={el.kind}
                 data-selected={isOpen}
                 data-cursor={visible[cursor]?.id === el.id}
+                data-new={justAdded.has(el.id)}
                 onClick={() => { setSelected(isOpen ? null : el.id); if (!isOpen) loadTakes(el.id) }}
               >
                 <span className="row-who">
@@ -564,6 +612,11 @@ export default function EpisodeView({
                         }} aria-label="Approve the newest take"><CheckIcon size={13} /></button>
                     )}
                   </span>
+                  {openNotes.get(el.id) && (
+                    <span className="note-count tnum" title="Open notes on this line">
+                      {openNotes.get(el.id)}
+                    </span>
+                  )}
                   <span className="dur">{formatMs(el.start_ms)}</span>
                   <span className="pip" data-s={el.status} title={el.status} />
                 </span>
@@ -576,6 +629,8 @@ export default function EpisodeView({
         <Suggestions
           project={project}
           elements={elements.filter(e => e.origin === 'script')}
+          fullElements={elements.filter(e => e.origin === 'script')}
+          assets={assets}
           scope="episode"
           onApplied={load}
         />
@@ -615,6 +670,11 @@ export default function EpisodeView({
         takes={selectedEl ? takes[selectedEl.id] ?? [] : []}
         busy={busyId === selectedEl?.id}
         blocks={usableBlocks}
+        comments={selectedEl ? comments.filter(c => c.element_id === selectedEl.id) : []}
+        userId={userId}
+        userEmail={userEmail}
+        episodeId={episode.id}
+        onCommentsChanged={load}
         blockReturnMs={blockReturnMs}
         pulseCount={pulseCount}
         episode={episode}
@@ -636,6 +696,7 @@ export default function EpisodeView({
         onRemoveBlock={async id => { await removeBlock(id); await load() }}
         onAddVault={id => selectedEl && addVaultAsset(selectedEl, id, 'scene')}
         onExport={() => setExporting(true)}
+        onDeleteEpisode={() => setDeleting(true)}
       />
       </div>
 
@@ -647,6 +708,63 @@ export default function EpisodeView({
           e.target.value = ''
         }}
       />
+
+      {deleting && (
+        <ConfirmTyped
+          title={`Delete ${episode.title}`}
+          phrase={episode.title}
+          confirmLabel="Delete the episode"
+          onClose={() => setDeleting(false)}
+          onConfirm={async () => {
+            const { error } = await supabase.from('episodes').delete().eq('id', episode.id)
+            if (error) { toast(error.message, 'bad'); return }
+            toast(`${episode.title} is gone.`)
+            onDeleted()
+          }}
+          body={
+            <>
+              <p>
+                {elements.length} elements go with it, including {approved} approved{' '}
+                {approved === 1 ? 'take' : 'takes'}. The script text goes too.
+              </p>
+              <p className="notice">
+                The vault is untouched. Anything this episode borrowed from it stays available to
+                the others.
+              </p>
+            </>
+          }
+        />
+      )}
+
+      {deleting && (
+        <ConfirmTyped
+          title={`Delete ${episode.title}`}
+          phrase={episode.title}
+          confirmLabel="Delete the episode"
+          onClose={() => setDeleting(false)}
+          onConfirm={async () => {
+            try {
+              const files = await deleteEpisode(episode.id)
+              toast(`${episode.title} deleted, along with ${files} audio files.`)
+              onDeleted()
+            } catch (e) {
+              toast(e instanceof Error ? e.message : 'Could not delete the episode', 'bad')
+            }
+          }}
+          body={
+            <>
+              <p>
+                The script, all {elements.length} elements and every take goes. {approved} of them
+                were approved.
+              </p>
+              <p className="notice">
+                Vault audio stays: themes and blocks belong to the series, not to this episode.
+                Nothing here can be recovered.
+              </p>
+            </>
+          }
+        />
+      )}
 
       {exporting && (
         <ExportPanel
@@ -694,7 +812,7 @@ export default function EpisodeView({
           loadTakes(id)
           const i = visibleRef.current.findIndex(v => v.id === id)
           if (i >= 0) setCursor(i)
-          document.getElementById(`row-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+          reveal(id)
         }}
       />
     </>

@@ -63,7 +63,7 @@ const TIMING_WORDS = new Set([
   'pause', 'silence', 'long', 'short', 'de', 'un', 'una', 'dos', 'tres', 'y', 'muy',
 ])
 
-function isTimingOnly(text: string): boolean {
+export function isTimingOnly(text: string): boolean {
   const words = normalize(text).split(' ').filter(Boolean)
   return words.length > 0 && words.every(w => TIMING_WORDS.has(w))
 }
@@ -165,12 +165,19 @@ export function detectPairs(
     })
     .sort((a, b) => b.occurrences - a.occurrences || b.averageSpan - a.averageSpan)
 
-  // Two cues in a row before the same closing cue describe one block, not two.
-  // Keep the outermost, which is the one that spans the most.
-  const seenClose = new Set<string>()
+  /*
+   * A cue belongs to one block. Walking the ranked list and claiming cues as we go
+   * removes two kinds of false positive at once:
+   *
+   *   the subset       CHASQUIDO → GOLPE and TIC → GOLPE are the same block
+   *   the wrap around  the GOLPE that closes one freeze pairing with the CHASQUIDO
+   *                    that opens the next one
+   */
+  const claimed = new Set<string>()
   return ranked.filter(p => {
-    if (seenClose.has(p.closeKey)) return false
-    seenClose.add(p.closeKey)
+    if (claimed.has(p.openKey) || claimed.has(p.closeKey)) return false
+    claimed.add(p.openKey)
+    claimed.add(p.closeKey)
     return true
   })
 }

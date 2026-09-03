@@ -1090,3 +1090,109 @@ select.inline:hover { border-color: var(--text-3); }
 .preview[data-chosen='true'] { border-color: var(--blue); background: var(--blue-wash); }
 .preview-name { flex: 1; font-size: var(--t-sm); color: var(--text-2); }
 .preview .btn { display: flex; align-items: center; gap: 5px; }
+
+/* ================= destructive actions ================= */
+
+.btn.danger {
+  border-color: var(--alert); color: var(--alert); background: var(--paper);
+}
+.btn.danger:hover { background: var(--alert); border-color: var(--alert); color: #fff; }
+.btn.danger:disabled { opacity: .35; }
+.btn.danger:disabled:hover { background: var(--paper); color: var(--alert); }
+
+.btn.quiet-danger { border-color: var(--rule-soft); color: var(--text-2); box-shadow: none; }
+.btn.quiet-danger:hover { background: var(--alert); border-color: var(--alert); color: #fff; }
+
+.danger-zone {
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+  margin: 40px 0 8px; padding: 18px 20px;
+  border: 1px solid var(--alert-wash); border-left: 2px solid var(--alert);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  background: var(--alert-wash);
+}
+.danger-zone .notice { color: #6b4a4a; }
+
+/* ================= destructive actions ================= */
+
+.btn.danger, .btn[data-variant='danger'] {
+  background: var(--alert); border-color: var(--alert); color: #fff;
+}
+.btn.danger:hover, .btn[data-variant='danger']:hover { background: #8d3333; border-color: #8d3333; }
+
+.btn.danger-quiet {
+  border-color: transparent; background: none; box-shadow: none;
+  color: var(--text-3); align-self: flex-start; padding-left: 0;
+}
+.btn.danger-quiet:hover { color: var(--alert); background: var(--alert-wash); padding-left: 12px; }
+
+.card-remove {
+  opacity: 0;
+  transition: opacity .14s var(--ease), background .12s var(--ease), color .12s var(--ease);
+}
+.series-card:hover .card-remove,
+.series-card:focus-within .card-remove { opacity: 1; }
+.card-remove:hover { color: var(--alert); background: var(--alert-wash); }
+
+.series-card { cursor: pointer; }
+.series-card:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.from-script {
+  font-size: 9px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  background: var(--paper-1); color: var(--text-3);
+  padding: 2px 6px; border-radius: 99px; flex: none; align-self: center;
+}
+.uses { font-family: var(--mono); font-size: var(--t-xs); color: var(--text-3); }
+
+/* ================= notes ================= */
+
+.note-count {
+  font-family: var(--mono); font-size: 10px; font-weight: 500;
+  background: var(--blue); color: #fff;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 99px; display: grid; place-items: center;
+}
+
+.notes { display: flex; flex-direction: column; gap: 7px; }
+
+.note {
+  border: 1px solid var(--rule-soft); border-radius: var(--r-sm);
+  padding: 9px 10px; position: relative;
+  transition: opacity .14s var(--ease);
+}
+.note[data-resolved='true'] { opacity: .5; background: var(--paper-1); }
+
+.note-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 3px; }
+.note-who {
+  font-size: var(--t-xs); font-weight: 600; color: var(--text-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.note-when { font-family: var(--mono); font-size: 10px; color: var(--text-3); margin-left: auto; }
+.note-body { margin: 0; font-size: var(--t-sm); line-height: 1.5; color: var(--text); }
+
+.note-actions {
+  position: absolute; top: 5px; right: 5px; display: flex; gap: 2px;
+  opacity: 0; transition: opacity .14s var(--ease);
+}
+.note:hover .note-actions, .note:focus-within .note-actions { opacity: 1; }
+
+.note-input {
+  border: 1px solid var(--rule); border-radius: var(--r-sm);
+  padding: 8px 10px; font-size: var(--t-sm); line-height: 1.5;
+  resize: vertical; background: var(--paper);
+  transition: border-color .12s var(--ease), box-shadow .12s var(--ease);
+}
+.note-input:focus {
+  outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-wash);
+}
+
+/* A row that has just been added holds a tint for a moment, then lets go.
+   Long enough to be found, short enough not to become decoration. */
+@keyframes just-added {
+  0%   { background: var(--blue-wash); }
+  70%  { background: var(--blue-wash); }
+  100% { background: transparent; }
+}
+.row[data-new='true'] { animation: just-added 1.4s var(--ease); }
+
+/* The playhead is positioned by transform, so it never triggers layout. */
+.playhead { will-change: transform; }

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { formatMs } from '../lib/parser'
-import { Plus } from './icons'
+import { Plus, Close } from './icons'
+import { deleteProject } from '../lib/deletion'
+import { ConfirmTyped, useToast } from './ui'
 import type { Episode, Project } from '../lib/types'
 
 interface Row { episode_id: string; status: string; duration_ms: number; anchor: string }
@@ -34,13 +36,16 @@ function Spine({ stat }: { stat: EpisodeStat }) {
 }
 
 export default function Library({
-  projects, onOpenProject, onOpenEpisode, onNewProject,
+  projects, onOpenProject, onOpenEpisode, onNewProject, onDeleted,
 }: {
   projects: Project[]
   onOpenProject: (id: string) => void
   onOpenEpisode: (projectId: string, episodeId: string) => void
   onNewProject: () => void
+  onDeleted: () => void
 }) {
+  const [confirming, setConfirming] = useState<Project | null>(null)
+  const toast = useToast()
   const [episodes, setEpisodes] = useState<Episode[]>([])
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
@@ -159,10 +164,16 @@ export default function Library({
             const runtime = list.reduce((n, s) => n + s.runtime, 0)
             const pct = total ? Math.round((approved / total) * 100) : 0
             return (
-              <button className="series-card" key={p.id} onClick={() => onOpenProject(p.id)}>
+              <div className="series-card" key={p.id} role="button" tabIndex={0}
+                onClick={() => onOpenProject(p.id)}
+                onKeyDown={e => { if (e.key === 'Enter') onOpenProject(p.id) }}>
                 <div className="series-top">
                   <h3>{p.name}</h3>
                   <span className="series-pct tnum">{total ? `${pct}%` : 'New'}</span>
+                  <button className="icon-btn card-remove" aria-label={`Delete ${p.name}`}
+                    onClick={e => { e.stopPropagation(); setConfirming(p) }}>
+                    <Close size={13} />
+                  </button>
                 </div>
 
                 <div className="series-spines">
@@ -180,7 +191,7 @@ export default function Library({
                   {runtime > 0 && <span className="tnum">{formatMs(runtime)}</span>}
                   <span className="series-lang">{p.language}</span>
                 </div>
-              </button>
+              </div>
             )
           })}
 
@@ -191,6 +202,35 @@ export default function Library({
           </button>
         </div>
       </section>
+
+      {confirming && (
+        <ConfirmTyped
+          title={`Delete ${confirming.name}`}
+          phrase={confirming.name}
+          confirmLabel="Delete the series"
+          onClose={() => setConfirming(null)}
+          onConfirm={async () => {
+            try {
+              const out = await deleteProject(confirming.id)
+              toast(`${confirming.name} deleted. ${out.episodes} episodes and ${out.files} files went with it.`)
+              onDeleted()
+            } catch (e) {
+              toast(e instanceof Error ? e.message : 'Could not delete the series', 'bad')
+            }
+          }}
+          body={
+            <>
+              <p>
+                Every episode, every script, every voice preset, the whole vault and all the audio
+                files. {(byProject.get(confirming.id) ?? []).length} episodes.
+              </p>
+              <p className="notice">
+                There is no undo and no copy kept anywhere. Only an owner of the team can do this.
+              </p>
+            </>
+          }
+        />
+      )}
     </div>
   )
 }
