@@ -9,6 +9,7 @@ import ManualNote from './ManualNote'
 import Inspector from './Inspector'
 import Suggestions from './Suggestions'
 import BottomPanel from './BottomPanel'
+import TrimEditor from './TrimEditor'
 import { Confirm, ConfirmTyped, Keys, useToast } from './ui'
 import { deleteEpisode } from '../lib/deletion'
 import { autofillVault, seedVault } from '../lib/autofill'
@@ -45,6 +46,7 @@ export default function EpisodeView({
   const [askGenerate, setAskGenerate] = useState<number | null>(null)
   const [exporting, setExporting] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [trimming, setTrimming] = useState<{ path: string; title: string } | null>(null)
   /** Rows added by a block or the vault, marked briefly so the eye can find them. */
   const [justAdded, setJustAdded] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState<'all' | 'todo' | 'review' | 'done'>('all')
@@ -390,7 +392,7 @@ export default function EpisodeView({
         : el.gain_role
       clips.push({
         id: el.id, url, startMs: el.start_ms, durationMs: el.duration_ms,
-        role, anchor: el.anchor,
+        role, anchor: el.anchor, gainDb: el.gain_db ?? 0,
       })
     }
     return clips
@@ -726,6 +728,24 @@ export default function EpisodeView({
         }}
       />
 
+      {trimming && (
+        <TrimEditor
+          path={trimming.path}
+          title={trimming.title}
+          userId={userId}
+          projectId={project.id}
+          onSaved={async (newPath, ms) => {
+            const el = positionedRef.current.find(e => e.id === selected)
+            if (!el) return
+            const { data } = await supabase.from('takes').insert({
+              element_id: el.id, storage_path: newPath, duration_ms: ms, provider: 'trim',
+            }).select().single()
+            if (data) await approve(el, data as Take)
+          }}
+          onClose={() => setTrimming(null)}
+        />
+      )}
+
       {deleting && (
         <ConfirmTyped
           title={`Delete ${episode.title}`}
@@ -750,6 +770,24 @@ export default function EpisodeView({
               </p>
             </>
           }
+        />
+      )}
+
+      {trimming && (
+        <TrimEditor
+          path={trimming.path}
+          title={trimming.title}
+          userId={userId}
+          projectId={project.id}
+          onSaved={async (newPath, ms) => {
+            const el = positionedRef.current.find(e => e.id === selected)
+            if (!el) return
+            const { data } = await supabase.from('takes').insert({
+              element_id: el.id, storage_path: newPath, duration_ms: ms, provider: 'trim',
+            }).select().single()
+            if (data) await approve(el, data as Take)
+          }}
+          onClose={() => setTrimming(null)}
         />
       )}
 
@@ -824,6 +862,31 @@ export default function EpisodeView({
         duckDb={project.music_duck_db}
         selectedId={selected}
         buildClips={buildClips}
+        episode={episode}
+        onLaneGain={async (lane, db) => {
+          const next = { ...(episode.lane_gain ?? {}), [lane]: db }
+          await supabase.from('episodes').update({ lane_gain: next }).eq('id', episode.id)
+          episode.lane_gain = next
+          setElements(e => [...e])
+        }}
+        onGain={async (id, db) => {
+          await supabase.from('elements').update({ gain_db: db }).eq('id', id)
+          setElements(list => list.map(e => (e.id === id ? { ...e, gain_db: db } : e)))
+        }}
+        onTrimSelected={async () => {
+          const el = positionedRef.current.find(e => e.id === selected)
+          if (!el) return
+          let path: string | null = null
+          if (el.series_asset_id) {
+            path = assets.find(a => a.id === el.series_asset_id)?.storage_path ?? null
+          } else if (el.approved_take_id) {
+            const { data } = await supabase.from('takes').select('storage_path')
+              .eq('id', el.approved_take_id).single()
+            path = data?.storage_path ?? null
+          }
+          if (!path) { toast('That line has no approved audio to trim yet.', 'bad'); return }
+          setTrimming({ path, title: el.text_content.slice(0, 30) })
+        }}
         onSelect={id => {
           setSelected(id)
           loadTakes(id)

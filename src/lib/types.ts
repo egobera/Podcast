@@ -99,6 +99,7 @@ export interface Episode {
   script_text: string
   target_min_ms: number
   target_max_ms: number
+  lane_gain: Record<string, number>
 }
 
 export type Origin = 'script' | 'template' | 'block'
@@ -124,6 +125,7 @@ export interface AudioElement {
   start_ms: number
   duration_ms: number
   gain_role: GainRole
+  gain_db: number
   status: ElementStatus
   approved_take_id: string | null
 }

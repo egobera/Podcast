@@ -1210,3 +1210,43 @@ select.inline:hover { border-color: var(--text-3); }
 
 /* The playhead is positioned by transform, so it never triggers layout. */
 .playhead { will-change: transform; }
+
+/* ================= mixing from the panel ================= */
+
+.lane-head { gap: 4px; }
+
+.fader {
+  width: 54px; height: 3px; flex: none;
+  appearance: none; background: var(--ink-2); border-radius: 99px; cursor: pointer;
+}
+.fader::-webkit-slider-thumb {
+  appearance: none; width: 11px; height: 11px; border-radius: 50%;
+  background: var(--ink-text-hi); border: 0; cursor: grab;
+}
+.fader::-webkit-slider-thumb:active { cursor: grabbing; transform: scale(1.15); }
+.fader::-moz-range-thumb {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: var(--ink-text-hi); border: 0;
+}
+.fader:focus-visible { outline: 2px solid #5ea3dd; outline-offset: 3px; }
+
+.fader-db {
+  font-family: var(--mono); font-size: 9px; color: #71818f;
+  width: 22px; text-align: right; flex: none;
+}
+
+.clip-tools {
+  display: flex; align-items: center; gap: 4px;
+  margin-left: 14px; padding-left: 14px;
+  border-left: 1px solid var(--ink-line);
+  min-width: 0;
+}
+.clip-name {
+  font-size: var(--t-xs); color: #8c9cae; margin-right: 4px;
+  max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.clip-tools .btn {
+  background: none; border-color: var(--ink-line); color: #8c9cae;
+  box-shadow: none; padding: 4px 9px;
+}
+.clip-tools .btn:hover { background: var(--ink-1); color: var(--ink-text-hi); }

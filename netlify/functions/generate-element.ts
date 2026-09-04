@@ -1,4 +1,4 @@
-import { admin, userFrom, json, monid, storeTake } from './_shared'
+import { admin, userFrom, json, speak, makeSound, storeTake } from './_shared'
 
 /** Generates one take for one element. Synchronous, so it must stay under 10 seconds. */
 export default async function handler(req: Request) {
@@ -31,24 +31,19 @@ export default async function handler(req: Request) {
       if (!ch?.voice_id) return json({ error: 'This character has no voice set yet.' }, 400)
       promptUsed = el.text_content
       provider = 'elevenlabs'
-      audio = await monid('elevenlabs.text_to_speech', {
-        voice_id: ch.voice_id,
-        model_id: ch.model,
+      audio = await speak({
+        voiceId: ch.voice_id,
         text: el.text_content,
-        language_code: languageCode,
-        voice_settings: {
-          stability: ch.stability,
-          similarity_boost: ch.similarity,
-          style: ch.style,
-        },
+        modelId: ch.model,
+        languageCode,
+        stability: ch.stability,
+        similarity: ch.similarity,
+        style: ch.style,
       })
     } else {
       promptUsed = el.prompt || el.text_content
       provider = 'elevenlabs'
-      audio = await monid('elevenlabs.sound_effects', {
-        text: promptUsed,
-        duration_seconds: Math.min(Math.max(el.duration_ms / 1000, 0.5), 22),
-      })
+      audio = await makeSound(promptUsed, el.duration_ms / 1000)
     }
 
     const take = await storeTake(db, userId, projectId, element_id, audio, promptUsed, provider)

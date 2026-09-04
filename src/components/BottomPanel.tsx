@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { EpisodePlayer, LANES, laneOf, type Clip, type Lane, type Monitor } from '../lib/player'
 import { Play, Pause, SkipBack, SkipForward, ChevronDown, ChevronUp, Spinner } from './icons'
-import type { AudioElement, GainRole } from '../lib/types'
+import type { AudioElement, Episode, GainRole } from '../lib/types'
 
 const LANE_LABEL: Record<Lane, string> = { voice: 'Voice', music: 'Music', effects: 'Sound' }
 /* Three hues inside the blue family: cerulean for voice, indigo for music, steel for sound.
@@ -35,6 +35,7 @@ function stepFor(totalMs: number, width: number) {
 
 export default function BottomPanel({
   elements, total, duckDb, buildClips, selectedId, onSelect,
+  episode, onLaneGain, onGain, onTrimSelected,
 }: {
   elements: (AudioElement & { start_ms: number })[]
   total: number
@@ -42,6 +43,10 @@ export default function BottomPanel({
   selectedId: string | null
   buildClips: () => Promise<Clip[]>
   onSelect: (id: string) => void
+  episode: Episode
+  onLaneGain: (lane: Lane, db: number) => void
+  onGain: (elementId: string, db: number) => void
+  onTrimSelected: () => void
 }) {
   const player = useRef<EpisodePlayer | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'playing'>('idle')
@@ -51,6 +56,7 @@ export default function BottomPanel({
   const [muted, setMuted] = useState<Set<Lane>>(new Set())
   const [soloed, setSoloed] = useState<Set<Lane>>(new Set())
   const [collapsed, setCollapsed] = useState(false)
+  const laneGain = episode.lane_gain ?? {}
   const [clips, setClips] = useState<Clip[]>([])
   const [width, setWidth] = useState(800)
   const raf = useRef(0)
@@ -224,7 +230,7 @@ export default function BottomPanel({
     if (!player.current) {
       player.current = new EpisodePlayer(duckDb)
       player.current.setMonitor(monitor)
-      player.current.setLaneState(muted, soloed)
+      player.current.setLaneState(muted, soloed, laneGain)
     }
     if (state === 'idle') {
       setState('loading')
@@ -268,9 +274,9 @@ export default function BottomPanel({
   }
 
   useEffect(() => {
-    player.current?.setLaneState(muted, soloed)
+    player.current?.setLaneState(muted, soloed, laneGain)
     draw()
-  }, [muted, soloed, draw])
+  }, [muted, soloed, laneGain, draw])
 
   useEffect(() => { player.current?.setMonitor(monitor) }, [monitor])
 
@@ -312,6 +318,11 @@ export default function BottomPanel({
     window.addEventListener('pointerup', up)
   }
 
+  const selected = elements.find(e => e.id === selectedId) ?? null
+  function onNudge(delta: number) {
+    if (selected) onGain(selected.id, Math.max(-24, Math.min(12, (selected.gain_db ?? 0) + delta)))
+  }
+
   const span = Math.max(total, 1)
   const step = stepFor(span, width)
   const ticks: number[] = []
@@ -338,6 +349,18 @@ export default function BottomPanel({
 
         {state === 'loading' && (
           <span className="tp-status">Preparing {progress.done} of {progress.total}</span>
+        )}
+
+        {selected && (
+          <div className="clip-tools">
+            <span className="clip-name">{selected.text_content.slice(0, 34)}</span>
+            <button className="tp-btn" onClick={() => onNudge(-1)} title="Quieter by 1 dB">−</button>
+            <span className="fader-db tnum">
+              {selected.gain_db > 0 ? '+' : ''}{selected.gain_db} dB
+            </span>
+            <button className="tp-btn" onClick={() => onNudge(1)} title="Louder by 1 dB">+</button>
+            <button className="btn" data-variant="quiet" onClick={onTrimSelected}>Trim</button>
+          </div>
         )}
 
         <div className="tp-right">
@@ -369,6 +392,17 @@ export default function BottomPanel({
                   onClick={() => toggle(soloed, lane, setSoloed)}
                   title={`Solo ${LANE_LABEL[lane].toLowerCase()}`}
                 >S</button>
+                <input
+                  className="fader"
+                  type="range" min={-24} max={12} step={1}
+                  value={laneGain[lane] ?? 0}
+                  onChange={e => onLaneGain(lane, Number(e.target.value))}
+                  title={`${LANE_LABEL[lane]} level`}
+                  aria-label={`${LANE_LABEL[lane]} level in decibels`}
+                />
+                <span className="fader-db tnum">
+                  {(laneGain[lane] ?? 0) > 0 ? '+' : ''}{laneGain[lane] ?? 0}
+                </span>
               </div>
             ))}
           </div>

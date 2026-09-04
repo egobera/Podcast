@@ -1,4 +1,4 @@
-import { admin, userFrom, ownsEpisode, json, monid, storeTake } from './_shared'
+import { admin, userFrom, ownsEpisode, json, speak, makeSound, storeTake } from './_shared'
 
 /**
  * First pass generator. The -background suffix is what tells Netlify to invoke this
@@ -36,6 +36,7 @@ export default async function handler(req: Request) {
   // Returned immediately. The work below keeps running in the background invocation.
   queueMicrotask(async () => {
     let done = 0, failed = 0
+    let lastError = ''
     const CONCURRENCY = 3   // providers rate limit hard above this
 
     const chars = new Map<string, any>()
@@ -57,24 +58,24 @@ export default async function handler(req: Request) {
             const ch = chars.get(el.character_id)
             if (!ch?.voice_id) throw new Error('no voice')
             prompt = el.text_content
-            audio = await monid('elevenlabs.text_to_speech', {
-              voice_id: ch.voice_id,
-              model_id: ch.model,
+            audio = await speak({
+              voiceId: ch.voice_id,
               text: el.text_content,
-              language_code: languageCode,
-              voice_settings: { stability: ch.stability, similarity_boost: ch.similarity, style: ch.style },
+              modelId: ch.model,
+              languageCode,
+              stability: ch.stability,
+              similarity: ch.similarity,
+              style: ch.style,
             })
           } else {
             prompt = el.prompt || el.text_content
-            audio = await monid('elevenlabs.sound_effects', {
-              text: prompt,
-              duration_seconds: Math.min(Math.max(el.duration_ms / 1000, 0.5), 22),
-            })
+            audio = await makeSound(prompt, el.duration_ms / 1000)
           }
           await storeTake(db, userId, projectId, el.id, audio, prompt, 'elevenlabs')
           done++
-        } catch {
+        } catch (e) {
           failed++
+          lastError = e instanceof Error ? e.message : String(e)
         }
         await db.from('jobs').update({ done, failed, updated_at: new Date().toISOString() }).eq('id', job!.id)
       }
@@ -82,7 +83,8 @@ export default async function handler(req: Request) {
 
     await Promise.all(workers)
     await db.from('jobs').update({
-      status: 'done', done, failed, updated_at: new Date().toISOString(),
+      status: 'done', done, failed, message: lastError,
+      updated_at: new Date().toISOString(),
     }).eq('id', job!.id)
   })
 

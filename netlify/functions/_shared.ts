@@ -33,31 +33,92 @@ export async function ownsEpisode(userId: string, episodeId: string) {
 export const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
+const ELEVEN = 'https://api.elevenlabs.io/v1'
+
+function key(): string {
+  const k = process.env.ELEVENLABS_API_KEY
+  if (!k) throw new Error('ELEVENLABS_API_KEY is not set on the server.')
+  return k
+}
+
+/** Turns an ElevenLabs error envelope into something a person can act on. */
+async function elevenError(res: Response, what: string): Promise<never> {
+  const raw = await res.text()
+  const lower = raw.toLowerCase()
+
+  if (res.status === 401 || lower.includes('missing_permissions') || lower.includes('unauthorized')) {
+    throw new Error(
+      `Your ElevenLabs key cannot ${what}. Create a key with Text to Speech and Voices ` +
+      'permissions enabled and set it as ELEVENLABS_API_KEY.',
+    )
+  }
+  if (res.status === 404) {
+    throw new Error('That voice is not in your ElevenLabs account. Set a new one on the character.')
+  }
+  if (lower.includes('quota')) {
+    throw new Error('Your ElevenLabs quota for this month is used up.')
+  }
+  try {
+    const parsed = JSON.parse(raw) as { detail?: { message?: string } | string }
+    const message = typeof parsed.detail === 'string' ? parsed.detail : parsed.detail?.message
+    if (message) throw new Error(message)
+  } catch (e) {
+    if (e instanceof Error && !e.message.startsWith('{')) throw e
+  }
+  throw new Error(`${what} failed: ${res.status} ${raw.slice(0, 200)}`)
+}
+
 /**
- * Calls a generation tool through Monid. One key, one balance, many providers.
- * Returns raw audio bytes.
+ * Speech, straight from ElevenLabs.
+ *
+ * This used to go through a router that answered 404 for the tool names we were using.
+ * Calling the provider directly removes a hop, a second set of credentials, and a second
+ * thing that can be wrong.
  */
-export async function monid(tool: string, payload: Record<string, unknown>): Promise<ArrayBuffer> {
-  const res = await fetch(`https://api.monid.ai/v1/tools/${tool}/invoke`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.MONID_API_KEY}`,
-      'Content-Type': 'application/json',
+export async function speak(opts: {
+  voiceId: string
+  text: string
+  modelId: string
+  languageCode?: string
+  stability: number
+  similarity: number
+  style: number
+}): Promise<ArrayBuffer> {
+  const res = await fetch(
+    `${ELEVEN}/text-to-speech/${opts.voiceId}?output_format=mp3_44100_128`,
+    {
+      method: 'POST',
+      headers: { 'xi-api-key': key(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: opts.text,
+        model_id: opts.modelId,
+        language_code: opts.languageCode,
+        voice_settings: {
+          stability: opts.stability,
+          similarity_boost: opts.similarity,
+          style: opts.style,
+          use_speaker_boost: true,
+        },
+      }),
     },
-    body: JSON.stringify(payload),
+  )
+  if (!res.ok) await elevenError(res, 'generate speech')
+  return res.arrayBuffer()
+}
+
+/** Sound effects, same account, same key. */
+export async function makeSound(prompt: string, seconds: number): Promise<ArrayBuffer> {
+  const res = await fetch(`${ELEVEN}/sound-generation?output_format=mp3_44100_128`, {
+    method: 'POST',
+    headers: { 'xi-api-key': key(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: prompt,
+      duration_seconds: Math.min(Math.max(seconds, 0.5), 22),
+      prompt_influence: 0.4,
+    }),
   })
-  if (!res.ok) throw new Error(`Monid ${tool} failed: ${res.status} ${await res.text()}`)
-
-  const type = res.headers.get('content-type') ?? ''
-  if (type.startsWith('audio/')) return res.arrayBuffer()
-
-  // Some tools return a JSON envelope with a URL or base64 payload.
-  const body = await res.json() as Record<string, any>
-  const url = body.audio_url ?? body.url ?? body.output?.url
-  if (url) return (await fetch(url)).arrayBuffer()
-  const b64 = body.audio_base64 ?? body.audio ?? body.output?.audio_base64
-  if (b64) return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer
-  throw new Error(`Monid ${tool} returned no audio`)
+  if (!res.ok) await elevenError(res, 'generate a sound')
+  return res.arrayBuffer()
 }
 
 /** Rough duration from an MP3 byte length. Replaced by the real value once the browser reads it. */

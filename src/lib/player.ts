@@ -10,6 +10,8 @@ export interface Clip {
   durationMs: number
   role: Exclude<GainRole, 'auto'>
   anchor: 'line' | 'scene'
+  /** Per clip trim, in dB, on top of whatever its role gives it. */
+  gainDb?: number
 }
 
 export function laneOf(role: Exclude<GainRole, 'auto'>): Lane {
@@ -91,9 +93,12 @@ export class EpisodePlayer {
     }
   }
 
-  setLaneState(muted: Set<Lane>, soloed: Set<Lane>) {
+  private laneGain: Record<string, number> = {}
+
+  setLaneState(muted: Set<Lane>, soloed: Set<Lane>, gains: Record<string, number> = {}) {
     this.muted = new Set(muted)
     this.soloed = new Set(soloed)
+    this.laneGain = gains
     this.applyLaneGains()
   }
 
@@ -104,7 +109,8 @@ export class EpisodePlayer {
       if (!bus) continue
       const silencedBySolo = this.soloed.size > 0 && !this.soloed.has(lane)
       const on = !this.muted.has(lane) && !silencedBySolo
-      bus.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.02)
+      const trim = dbToGain(this.laneGain[lane] ?? 0)
+      bus.gain.setTargetAtTime(on ? trim : 0, this.ctx.currentTime, 0.02)
     }
   }
 
@@ -177,13 +183,14 @@ export class EpisodePlayer {
       src.buffer = buffer
 
       const gain = ctx.createGain()
-      const base = dbToGain(GAIN_TABLE[clip.role])
+      const offset = clip.gainDb ?? 0
+      const base = dbToGain(GAIN_TABLE[clip.role] + offset)
       const ducks = clip.role === 'bed' || clip.role === 'ambience'
 
       if (!ducks) {
         gain.gain.value = base
       } else {
-        const ducked = dbToGain(GAIN_TABLE[clip.role] - this.duckDb + 8)
+        const ducked = dbToGain(GAIN_TABLE[clip.role] + offset - this.duckDb + 8)
         gain.gain.setValueAtTime(base, t0)
         for (const [ws, we] of windows) {
           if (we < fromS) continue

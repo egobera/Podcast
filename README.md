@@ -57,7 +57,8 @@ Cuando esté listo:
 13. Otra con `supabase/migration-007-block-triggers.sql`
 14. Otra con `supabase/migration-008-suggestions.sql`
 15. Otra con `supabase/migration-009-autofill-vault.sql`
-16. Y la última, `supabase/migration-010-comments.sql`
+16. Otra con `supabase/migration-010-comments.sql`
+17. Y la última, `supabase/migration-011-mix.sql`
 
 El primero crea las tablas, las reglas de seguridad y el almacén de audio. El segundo añade la
 plantilla de episodio, el bloque de congelamiento y los objetivos de duración de 8 minutos. El
@@ -90,26 +91,24 @@ tercero convierte todo en multiusuario.
 
 ---
 
-## Paso 4. Crear la cuenta de Monid
+## Paso 4. Clave de ElevenLabs
 
-1. Entra en monid.ai y crea una cuenta
-2. Añade saldo. Con 20 dólares tienes de sobra para probar
-3. Genera una API key y cópiala
-
----
-
-## Paso 5. Clave de ElevenLabs
-
-La clonación de voz no pasa por Monid, así que necesitas una clave directa.
+Toda la generación va directa a ElevenLabs: voces, efectos y clonación. Con una clave basta.
 
 1. Entra en elevenlabs.io con tu cuenta
-2. Perfil, **API Keys**, crea una y cópiala
+2. Perfil, **API Keys**, **Create API Key**
+3. Activa estos permisos, o nada funcionará:
+   - **Text to Speech**: Access
+   - **Sound Generation**: Access
+   - **Voices**: Write, si vas a clonar o diseñar voces
+4. Cópiala
 
-Si de momento no vas a clonar voces, puedes dejar este valor vacío y rellenarlo después.
+Una clave sin el permiso de escritura de voces genera diálogo pero no puede clonar. Es el error
+más frecuente al empezar.
 
 ---
 
-## Paso 6. Configurar las variables locales
+## Paso 5. Configurar las variables locales
 
 En la carpeta del proyecto, copia el archivo de ejemplo:
 
@@ -117,14 +116,14 @@ En la carpeta del proyecto, copia el archivo de ejemplo:
 cp .env.example .env
 ```
 
-Abre `.env` y rellena los seis valores con lo que copiaste. Las que empiezan por `VITE_` van al
+Abre `.env` y rellena los valores con lo que copiaste. Las que empiezan por `VITE_` van al
 navegador y son públicas; las otras cuatro son secretas y solo las ve el servidor.
 
 **El archivo `.env` nunca se sube a GitHub.** Ya está excluido en `.gitignore`.
 
 ---
 
-## Paso 7. Probar en tu computadora
+## Paso 6. Probar en tu computadora
 
 ```bash
 npm run dev
@@ -144,7 +143,7 @@ Eso levanta la web y las funciones a la vez, en el puerto 8888.
 
 ---
 
-## Paso 8. Subir a GitHub
+## Paso 7. Subir a GitHub
 
 ```bash
 git init
@@ -163,7 +162,7 @@ git push -u origin main
 
 ---
 
-## Paso 9. Desplegar en Netlify
+## Paso 8. Desplegar en Netlify
 
 1. Entra en netlify.com y accede con tu cuenta de GitHub
 2. **Add new site**, **Import an existing project**, **GitHub**
@@ -190,7 +189,7 @@ generación masiva se corta a los 10 segundos.
 
 ---
 
-## Paso 10. Primer uso
+## Paso 9. Primer uso
 
 1. **Create an account** con tu correo y una contraseña de al menos 8 caracteres. La sesión queda
    guardada en el navegador y se renueva sola, así que no vuelves a escribirla salvo que cierres
@@ -558,6 +557,18 @@ lugar de deslizarse.
 tiñen un segundo y medio y sueltan el color, lo justo para encontrarlas sin que se convierta en
 decoración.
 
+## Mezclar desde el panel inferior
+
+Cada carril lleva su propio fader, con el nivel en decibelios al lado. Se guarda en el episodio, así
+que un ambiente que quedó alto se corrige una vez y queda corregido.
+
+Al seleccionar un clip, la barra superior del panel muestra su nombre, su nivel y dos botones para
+subirlo o bajarlo de decibelio en decibelio, más un acceso directo a **Trim**. Ese recorte guarda
+una toma nueva y la aprueba, así que el original sigue en la lista de tomas por si te arrepientes.
+
+El nivel de un clip se suma al de su papel. Un efecto puntual está 8 dB bajo la voz por defecto; si
+le pones +3, queda a −5.
+
 ## Tests
 
 ```bash
@@ -604,6 +615,14 @@ Vuelve a ejecutar el archivo entero desde el principio. Están escritas para pod
 
 **"policy ... already exists" al ejecutar una migración**
 Versión antigua del archivo. Usa la del paquete actual, que borra cada política antes de crearla.
+
+**"Monid ... failed: 404"**
+Ya no existe: toda la generación va directa a ElevenLabs. Actualiza el código y borra
+`MONID_API_KEY` de las variables si quieres.
+
+**La tanda se queda generando sin avanzar**
+Mira el aviso al terminar: ahora guarda el motivo del último fallo. Casi siempre es un permiso que
+falta en la clave de ElevenLabs, o un personaje sin voz asignada.
 
 **"Failed to execute 'json' on 'Response'" al generar la tanda**
 Corregido. Una función de fondo de Netlify responde 202 con el cuerpo vacío, y el cliente intentaba
