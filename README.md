@@ -575,6 +575,23 @@ creando un bloque fantasma. Escribiendo esta batería aparecieron dos fallos má
 código: las etiquetas `<break>` contaban como palabras al estimar la duración, y ese emparejamiento
 cruzado entre bloques consecutivos.
 
+## Cómo escribir la música y los ambientes en el guion
+
+Etiqueta cada indicación y la app la clasifica bien sin adivinar:
+
+```
+*(MÚSICA · Cama de tensión. Entra a 5:35 en bucle, 20 dB bajo la voz. Sigue hasta 8:30.)*
+*(AMBIENTE · Cocina de domingo. Entra a 0:45 y se mantiene hasta 2:00.)*
+*(AMBIENTE · Ninguno. Esta escena va seca a propósito.)*
+```
+
+La etiqueta manda sobre el contenido, así que un ambiente que menciona una cama musical de pasada
+sigue siendo un ambiente. Y una que dice *Ninguno* no crea ningún elemento: es una nota para quien
+produce.
+
+Música y ambientes se anclan a la escena, no a la línea, así que no empujan la duración del
+episodio. Solo la voz y los efectos puntuales lo hacen.
+
 ## Problemas frecuentes
 
 **"Missing VITE_SUPABASE_URL"**
@@ -587,6 +604,18 @@ Vuelve a ejecutar el archivo entero desde el principio. Están escritas para pod
 
 **"policy ... already exists" al ejecutar una migración**
 Versión antigua del archivo. Usa la del paquete actual, que borra cada política antes de crearla.
+
+**"Failed to execute 'json' on 'Response'" al generar la tanda**
+Corregido. Una función de fondo de Netlify responde 202 con el cuerpo vacío, y el cliente intentaba
+leerlo como JSON.
+
+**"missing the permission voices_write"**
+Tu clave de ElevenLabs no puede crear voces. En ElevenLabs, perfil, API Keys, crea una nueva con el
+permiso **Voices: Write** activado y sustituye `ELEVENLABS_API_KEY`.
+
+**"this prompt potentially doesn't follow our safety guidelines"**
+ElevenLabs bloquea diseñar voces que suenen a menores. Una voz infantil tiene que venir de la
+biblioteca de voces o de la clonación de un niño real con consentimiento por escrito.
 
 **No puedo crear una serie y no pasa nada al pulsar**
 Casi siempre es que falta ejecutar `migration-003-teams.sql`. Sin ella no existe el equipo al que

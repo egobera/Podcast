@@ -56,6 +56,29 @@ describe('parseScript', () => {
     expect(elements[2].gainRole).toBe('impact')
   })
 
+  it('trusts an explicit label over the words inside the cue', () => {
+    // This one read as music because it mentions a music bed in passing.
+    const { elements } = parseScript(
+      '*(AMBIENTE · Sala. Entra a 7:00. La cama de tensión sigue sonando desde 5:35.)*',
+    )
+    expect(elements[0].kind).toBe('ambience')
+    expect(elements[0].gainRole).toBe('ambience')
+  })
+
+  it('skips a cue that says there is no sound', () => {
+    const { elements } = parseScript(
+      '*(AMBIENTE · Ninguno. Esta escena va seca a propósito.)*\n\n**SIRA:** Hola.',
+    )
+    expect(elements).toHaveLength(1)
+    expect(elements[0].kind).toBe('dialogue')
+  })
+
+  it('keeps music beds out of the timeline push', () => {
+    const { elements } = parseScript('*(MÚSICA · Cama de tensión. Entra a 5:35 en bucle.)*')
+    expect(elements[0].kind).toBe('music')
+    expect(elements[0].anchor).toBe('scene')
+  })
+
   it('counts break tags towards the estimated duration', () => {
     const plain = estimateSpeechMs('Hola qué tal')
     const withBreak = estimateSpeechMs('Hola <break time="2.0s" /> qué tal')

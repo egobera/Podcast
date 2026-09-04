@@ -62,6 +62,25 @@ export async function callFunction<T>(name: string, body: unknown): Promise<T> {
     },
     body: JSON.stringify(body),
   })
-  if (!res.ok) throw new Error(await res.text())
-  return res.json() as Promise<T>
+
+  const raw = await res.text()
+
+  if (!res.ok) {
+    // Functions answer with { error } when they can; fall back to whatever came out.
+    try {
+      const parsed = JSON.parse(raw) as { error?: string }
+      throw new Error(parsed.error ?? raw)
+    } catch (e) {
+      throw e instanceof Error && e.message !== raw ? e : new Error(raw || `Request failed (${res.status})`)
+    }
+  }
+
+  // A background function returns 202 and nothing at all. That is not an error.
+  if (!raw.trim()) return undefined as T
+
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    throw new Error('The server sent something that was not JSON.')
+  }
 }

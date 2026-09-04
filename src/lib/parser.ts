@@ -154,17 +154,32 @@ export function parseScript(script: string): ParsedScript {
     const cue = line.match(/^\*?\(([^)]+)\)\*?$/)
     if (cue) {
       const desc = cue[1].trim()
-      const isMusic = /sinton|m[uú]sica|theme|cama|music/i.test(desc)
+
+      // A cue that says there is nothing is a note to the producer, not a sound.
+      if (/^(m[uú]sica|ambiente|sound|music)\s*[·:-]\s*(ninguno|ninguna|nada|none)/i.test(desc)) continue
+
+      /*
+       * An explicit label wins over guessing. "AMBIENTE · Sala. La cama de tensión sigue
+       * sonando" is an ambience, even though the word for a music bed appears in it.
+       */
+      const labelled = desc.match(/^(m[uú]sica|ambiente|music|ambience|sound|sfx)\s*[·:-]/i)
+      const label = labelled?.[1]?.toLowerCase() ?? ''
+      const isMusic = label
+        ? /^(m[uú]sica|music)$/.test(label)
+        : /sinton|m[uú]sica|theme|cama|music/i.test(desc)
+      const isAmbience = label
+        ? /^(ambiente|ambience)$/.test(label)
+        : /ambiente|ambience/i.test(desc)
       out.push({
         idx: idx++,
         scene,
-        kind: isMusic ? 'music' : /ambiente|ambience/i.test(desc) ? 'ambience' : 'sfx',
+        kind: isMusic ? 'music' : isAmbience ? 'ambience' : 'sfx',
         characterName: null,
         text: desc,
-        anchor: /ambiente|ambience/i.test(desc) ? 'scene' : 'line',
+        anchor: isAmbience || isMusic ? 'scene' : 'line',
         gainRole: isMusic
           ? 'bed'
-          : /ambiente|ambience/i.test(desc)
+          : isAmbience
             ? 'ambience'
             : /crac|romp|break|golpe de aire|glass/i.test(desc)
               ? 'impact'

@@ -9,7 +9,7 @@ export default async function handler(req: Request) {
   const userId = await userFrom(req)
   if (!userId) return json({ error: 'Not signed in' }, 401)
 
-  const { episode_id } = await req.json() as { episode_id: string }
+  const { episode_id, job_id } = await req.json() as { episode_id: string; job_id: string }
   const owned = await ownsEpisode(userId, episode_id)
   if (!owned) return json({ error: 'Not found' }, 404)
 
@@ -23,9 +23,15 @@ export default async function handler(req: Request) {
   const { data: pending } = await db.from('elements')
     .select('*').eq('episode_id', episode_id).in('status', ['missing', 'stale']).order('idx')
 
-  const { data: job } = await db.from('jobs').insert({
-    episode_id, status: 'running', total: pending?.length ?? 0,
-  }).select().single()
+  /*
+   * The job row already exists: the browser created it so it has something to poll from
+   * the first second. Netlify answers a background invocation with 202 and an empty body,
+   * so nothing this function returns ever reaches the client.
+   */
+  await db.from('jobs')
+    .update({ status: 'running', total: pending?.length ?? 0 })
+    .eq('id', job_id)
+  const job = { id: job_id }
 
   // Returned immediately. The work below keeps running in the background invocation.
   queueMicrotask(async () => {

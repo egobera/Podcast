@@ -10,6 +10,39 @@ import { userFrom, json } from './_shared'
  * This is the answer to "I want it to sound older": you cannot ask a clone to change,
  * but you can describe the voice you actually want and have one made.
  */
+/**
+ * ElevenLabs speaks in JSON envelopes. People do not.
+ *
+ * Two of these come up constantly and both have a specific fix, so they are worth naming
+ * instead of dumping the raw payload on screen.
+ */
+function explain(raw: string, step: 'design' | 'save'): string {
+  const lower = raw.toLowerCase()
+
+  if (lower.includes('blocked_generation') || lower.includes('safety guidelines')) {
+    return 'ElevenLabs blocked that description. Designed voices cannot be made to sound like ' +
+      'children, so a child character has to come from the voice library or from a clone of a ' +
+      'real child with written consent from a parent. Try describing an adult, or pick a ' +
+      'catalog voice instead.'
+  }
+
+  if (lower.includes('voices_write') || lower.includes('missing_permissions')) {
+    return 'Your ElevenLabs API key cannot create voices. Make a new key with the ' +
+      '"Voices: Write" permission enabled and put it in ELEVENLABS_API_KEY.'
+  }
+
+  if (lower.includes('quota') || lower.includes('limit')) {
+    return 'Your ElevenLabs account has run out of quota for this month.'
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as { detail?: { message?: string } }
+    if (parsed.detail?.message) return parsed.detail.message
+  } catch { /* not JSON */ }
+
+  return step === 'design' ? `Could not design the voice: ${raw}` : `Could not save the voice: ${raw}`
+}
+
 export default async function handler(req: Request) {
   const userId = await userFrom(req)
   if (!userId) return json({ error: 'Not signed in' }, 401)
@@ -42,7 +75,7 @@ export default async function handler(req: Request) {
           auto_generate_text: !body.text,
         }),
       })
-      if (!res.ok) return json({ error: `Design failed: ${await res.text()}` }, 500)
+      if (!res.ok) return json({ error: explain(await res.text(), 'design') }, 400)
 
       const out = await res.json() as {
         previews: { generated_voice_id: string; audio_base_64: string }[]
@@ -63,7 +96,7 @@ export default async function handler(req: Request) {
           generated_voice_id: body.generated_voice_id,
         }),
       })
-      if (!res.ok) return json({ error: `Could not save the voice: ${await res.text()}` }, 500)
+      if (!res.ok) return json({ error: explain(await res.text(), 'save') }, 400)
 
       const out = await res.json() as { voice_id: string }
       return json({ voice_id: out.voice_id })

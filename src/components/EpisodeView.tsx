@@ -71,11 +71,17 @@ export default function EpisodeView({
 
   useEffect(() => {
     if (!job || ['done', 'failed', 'cancelled'].includes(job.status)) return
+    let stalled = 0
     const t = setInterval(async () => {
       const { data } = await supabase.from('jobs').select('*').eq('id', job.id).single()
       if (data) {
         setJob(data as Job)
         if (data.status === 'done' || data.status === 'failed') load()
+        // Still queued after a minute means the worker never woke up.
+        if (data.status === 'queued' && ++stalled > 24) {
+          toast('The run never started. Background functions need a paid Netlify plan.', 'bad')
+          setJob(null)
+        }
       }
     }, 2500)
     return () => clearInterval(t)
@@ -273,9 +279,20 @@ export default function EpisodeView({
 
   async function runFirstPass() {
     try {
-      const out = await callFunction<{ job_id: string }>('generate-episode-background', { episode_id: episode.id })
-      const { data } = await supabase.from('jobs').select('*').eq('id', out.job_id).single()
-      setJob(data as Job)
+      const pending = elements.filter(e => e.status === 'missing' || e.status === 'stale').length
+
+      const { data: created, error } = await supabase.from('jobs')
+        .insert({ episode_id: episode.id, status: 'queued', total: pending })
+        .select().single()
+      if (error) { toast(`Could not start the run: ${error.message}`, 'bad'); return }
+
+      setJob(created as Job)
+
+      // Fires and forgets: a background function replies 202 with no body.
+      await callFunction('generate-episode-background', {
+        episode_id: episode.id,
+        job_id: (created as Job).id,
+      })
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not start the run', 'bad')
     }
