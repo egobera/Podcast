@@ -62,7 +62,9 @@ Cuando esté listo:
 18. Otra con `supabase/migration-012-expected-length.sql`
 19. Otra con `supabase/migration-013-direction.sql`
 20. Otra con `supabase/migration-014-clear-raw-prompts.sql`
-21. Y la última, `supabase/migration-015-clean-pause-assets.sql`
+21. Otra con `supabase/migration-015-clean-pause-assets.sql`
+22. Otra con `supabase/migration-016-voice-prompt.sql`
+23. Y la última, `supabase/migration-017-restore-descriptions.sql`
 
 El primero crea las tablas, las reglas de seguridad y el almacén de audio. El segundo añade la
 plantilla de episodio, el bloque de congelamiento y los objetivos de duración de 8 minutos. El
@@ -371,6 +373,14 @@ debajo se ve exactamente qué se le está diciendo al modelo. Como máximo tres 
 más, y la interpretación se convierte en una caricatura.
 
 De tu episodio 1, 37 líneas traen acotación y 19 producen instrucción para el modelo.
+
+## Ver lo que recibe el modelo
+
+Cada línea de diálogo tiene en el inspector un desplegable, **Exactly what is sent for this line**,
+con la cadena literal que se manda: las etiquetas de audio delante, las pausas donde vayan y el
+texto. Y dice si el tono vino de la línea o del personaje.
+
+Sin eso, ajustar una interpretación es a ciegas.
 
 ## Escuchar
 
@@ -713,6 +723,14 @@ debajo se ve exactamente qué se le está diciendo al modelo. Como máximo tres 
 más, y la interpretación se convierte en una caricatura.
 
 De tu episodio 1, 37 líneas traen acotación y 19 producen instrucción para el modelo.
+
+## Ver lo que recibe el modelo
+
+Cada línea de diálogo tiene en el inspector un desplegable, **Exactly what is sent for this line**,
+con la cadena literal que se manda: las etiquetas de audio delante, las pausas donde vayan y el
+texto. Y dice si el tono vino de la línea o del personaje.
+
+Sin eso, ajustar una interpretación es a ciegas.
 
 ## Escuchar
 

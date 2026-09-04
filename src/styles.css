@@ -1316,3 +1316,19 @@ select.inline:hover { border-color: var(--text-3); }
   outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-wash);
 }
 .sound-controls .unit { color: var(--text-3); margin-right: auto; }
+
+.sent { margin-top: 4px; }
+.sent summary {
+  cursor: pointer; font-size: var(--t-xs); color: var(--text-3);
+  list-style: none;
+}
+.sent summary::-webkit-details-marker { display: none; }
+.sent summary::before { content: '▸ '; }
+.sent[open] summary::before { content: '▾ '; }
+.sent summary:hover { color: var(--text-2); }
+.sent pre {
+  font-family: var(--mono); font-size: var(--t-xs); line-height: 1.6;
+  background: var(--paper-1); border: 1px solid var(--rule-soft);
+  border-radius: var(--r-sm); padding: 9px 10px; margin: 7px 0 5px;
+  white-space: pre-wrap; word-break: break-word; color: var(--text-2);
+}

@@ -75,7 +75,8 @@ export default function VoiceDesigner({
   accent: string
   /** The description the script carries. Everything below starts from it. */
   fromScript?: string
-  onSaved: (voiceId: string, description: string) => void
+  /** The design prompt, kept apart from the character's own description. */
+  onSaved: (voiceId: string, designPrompt: string) => void
   onClose: () => void
 }) {
   const [picked, setPicked] = useState<Record<string, string>>(() => traitsFrom(fromScript))

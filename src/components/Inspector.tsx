@@ -375,6 +375,16 @@ function DirectionField({
         ))}
       </div>
 
+      <details className="sent">
+        <summary>Exactly what is sent for this line</summary>
+        <pre>{out.text}</pre>
+        <span className="hint">
+          {tone.fromCharacter
+            ? `Tone inherited from ${character?.name ?? 'the character'}.`
+            : 'Tone written on this line.'}
+        </span>
+      </details>
+
       <span className="hint">
         {out.tags.length > 0
           ? <>The model is told: {out.tags.join(' ')}{tone.fromCharacter && ', from the character'}</>

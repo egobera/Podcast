@@ -190,6 +190,17 @@ export default function Characters({ project, onChanged }: { project: Project; o
                     {accentsFor(project.language_code).map(a => <option key={a} value={a}>{a}</option>)}
                   </select>
                 </div>
+                {c.voice_prompt && (
+                  <div className="field">
+                    <label>Voice was designed from</label>
+                    <p className="described">{c.voice_prompt}</p>
+                    <span className="hint">
+                      This described the voice, not how it performs. The tone below is what
+                      changes how lines are read.
+                    </span>
+                  </div>
+                )}
+
                 <div className="field">
                   <label>Default tone</label>
                   <textarea
@@ -241,8 +252,10 @@ export default function Characters({ project, onChanged }: { project: Project; o
           languageCode={project.language_code}
           accent={designing.accent ?? project.accent}
           fromScript={designing.description ?? ''}
-          onSaved={(voiceId, description) => {
-            patch(designing.id, { voice_id: voiceId, source: 'catalog', description })
+          onSaved={(voiceId, prompt) => {
+            // The design prompt is not the character's description. Writing one over the
+            // other is how the narrator ended up described in English.
+            patch(designing.id, { voice_id: voiceId, source: 'catalog', voice_prompt: prompt })
           }}
           onClose={() => setDesigning(null)}
         />

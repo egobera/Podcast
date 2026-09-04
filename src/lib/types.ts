@@ -72,6 +72,7 @@ export interface Character {
   similarity: number
   style: number
   direction_notes: string
+  voice_prompt: string
   accent: string | null
   sample_language: string | null
   consent_url: string | null
