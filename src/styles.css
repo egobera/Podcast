@@ -1300,3 +1300,19 @@ select.inline:hover { border-color: var(--text-3); }
 }
 .orphans-main { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .orphans .btn { flex: none; }
+
+.sound-controls {
+  display: flex; align-items: center; gap: 8px;
+  padding-top: 10px; margin-top: 2px;
+  border-top: 1px solid var(--rule-soft);
+  font-size: var(--t-xs); color: var(--text-2);
+}
+.sound-controls input {
+  width: 56px; border: 1px solid var(--rule); border-radius: var(--r-sm);
+  padding: 5px 8px; font-size: var(--t-xs); background: var(--paper);
+  font-variant-numeric: tabular-nums;
+}
+.sound-controls input:focus {
+  outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-wash);
+}
+.sound-controls .unit { color: var(--text-3); margin-right: auto; }

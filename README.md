@@ -337,6 +337,19 @@ mueve si lo cambias.
 
 ## Cómo se dice cada línea
 
+Un guion no dirige cada frase: dirige las que se salen de la norma. En el episodio 1, 37 líneas de
+115 traen acotación. Las demás no están sin tono, están en el tono del personaje.
+
+Por eso cada personaje tiene un **tono por defecto**, que sale de la descripción del reparto y se
+aplica a toda línea que no traiga acotación propia. La narradora es *cálida, cercana, ritmo
+tranquilo* en las 78 líneas donde el guion no dice otra cosa.
+
+La acotación de una línea **sustituye** al tono del personaje, no se suma. Si el guion dice
+*gritando*, es gritando, no gritando sobre calma.
+
+Resultado en el episodio 1: 37 líneas con dirección propia, 78 heredadas del personaje, ninguna
+leída en plano.
+
 Un guion no solo dice qué se dice, dice cómo. `*(la voz quebrándose)*`, `*(muy despacio)*`,
 `*(suspirando)*`. Todo eso se descartaba al leer el guion, y por eso el resultado sonaba plano.
 
@@ -359,7 +372,20 @@ más, y la interpretación se convierte en una caricatura.
 
 De tu episodio 1, 37 líneas traen acotación y 19 producen instrucción para el modelo.
 
-## Escuchar el episodio
+## Escuchar
+
+Se escucha **antes** de aprobar, no después. La reproducción usa la toma aprobada si la hay y la más
+reciente si no, así que un episodio recién generado suena entero desde el primer momento. Aprobar es
+lo que se hace después de oírlo, no el requisito para oírlo.
+
+Todos los botones de reproducción son también de pausa, y solo suena una cosa a la vez. Generar
+detiene lo que estuviera sonando: dos audios encimados mientras se reemplaza una toma no ayudan a
+nadie.
+
+## Si el episodio suena sin sintonía
+
+Las sintonías se colocan cuando se **crea** el episodio. Un episodio creado antes de llenar la
+bóveda nunca las recibió. El panel derecho lo detecta y ofrece colocarlas, sin recrear nada. el episodio
 
 Pulsa **espacio** en cualquier momento, o el botón de reproducción de la barra inferior. La app
 descarga todo lo aprobado, lo coloca en su minuto y lo reproduce como lo va a oír el oyente.
@@ -653,6 +679,19 @@ mueve si lo cambias.
 
 ## Cómo se dice cada línea
 
+Un guion no dirige cada frase: dirige las que se salen de la norma. En el episodio 1, 37 líneas de
+115 traen acotación. Las demás no están sin tono, están en el tono del personaje.
+
+Por eso cada personaje tiene un **tono por defecto**, que sale de la descripción del reparto y se
+aplica a toda línea que no traiga acotación propia. La narradora es *cálida, cercana, ritmo
+tranquilo* en las 78 líneas donde el guion no dice otra cosa.
+
+La acotación de una línea **sustituye** al tono del personaje, no se suma. Si el guion dice
+*gritando*, es gritando, no gritando sobre calma.
+
+Resultado en el episodio 1: 37 líneas con dirección propia, 78 heredadas del personaje, ninguna
+leída en plano.
+
 Un guion no solo dice qué se dice, dice cómo. `*(la voz quebrándose)*`, `*(muy despacio)*`,
 `*(suspirando)*`. Todo eso se descartaba al leer el guion, y por eso el resultado sonaba plano.
 
@@ -676,6 +715,19 @@ más, y la interpretación se convierte en una caricatura.
 De tu episodio 1, 37 líneas traen acotación y 19 producen instrucción para el modelo.
 
 ## Escuchar
+
+Se escucha **antes** de aprobar, no después. La reproducción usa la toma aprobada si la hay y la más
+reciente si no, así que un episodio recién generado suena entero desde el primer momento. Aprobar es
+lo que se hace después de oírlo, no el requisito para oírlo.
+
+Todos los botones de reproducción son también de pausa, y solo suena una cosa a la vez. Generar
+detiene lo que estuviera sonando: dos audios encimados mientras se reemplaza una toma no ayudan a
+nadie.
+
+## Si el episodio suena sin sintonía
+
+Las sintonías se colocan cuando se **crea** el episodio. Un episodio creado antes de llenar la
+bóveda nunca las recibió. El panel derecho lo detecta y ofrece colocarlas, sin recrear nada.
 
 Todos los botones de reproducción son también de pausa, y solo suena una cosa a la vez. Pulsar en
 otro sitio detiene lo anterior en lugar de encimarlo.

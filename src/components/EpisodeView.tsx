@@ -4,7 +4,7 @@ import {
   parseScript, uniqueCharacters, formatMs, hash, layout, runtime,
   IDX_SCRIPT_START, IDX_STEP,
 } from '../lib/parser'
-import { insertBlock, removeBlock, insertVaultAsset, findCueSpans } from '../lib/template'
+import { insertBlock, removeBlock, insertVaultAsset, findCueSpans, applyTemplate, missingTemplateAssets } from '../lib/template'
 import ManualNote from './ManualNote'
 import Inspector from './Inspector'
 import Suggestions from './Suggestions'
@@ -36,6 +36,7 @@ export default function EpisodeView({
   const [assets, setAssets] = useState<SeriesAsset[]>([])
   const [blocks, setBlocks] = useState<SeriesBlock[]>([])
   const [comments, setComments] = useState<Comment[]>([])
+  const [missingThemes, setMissingThemes] = useState<{ id: string; name: string }[]>([])
   const [takes, setTakes] = useState<Record<string, Take[]>>({})
   const [selected, setSelected] = useState<string | null>(null)
   const [script, setScript] = useState(episode.script_text ?? '')
@@ -72,6 +73,7 @@ export default function EpisodeView({
     setAssets((sa ?? []) as SeriesAsset[])
     setBlocks((bl ?? []) as SeriesBlock[])
     setComments((cm ?? []) as Comment[])
+    setMissingThemes(await missingTemplateAssets(episode.id, project.id))
   }, [episode.id, project.id])
 
   useEffect(() => { load(); setScript(episode.script_text ?? '') }, [load, episode.id])
@@ -273,6 +275,7 @@ export default function EpisodeView({
   }
 
   async function generateOne(el: AudioElement) {
+    preview.stop()   // nothing should keep playing over the take being replaced
     setBusyId(el.id)
     setError('')
     try {
@@ -298,6 +301,7 @@ export default function EpisodeView({
    * because it counts finished calls, and it can be stopped halfway.
    */
   async function runFirstPass() {
+    preview.stop()
     const pending = elements.filter(e => e.status === 'missing' || e.status === 'stale')
     if (pending.length === 0) { toast('Nothing left to generate.'); return }
 
@@ -391,6 +395,11 @@ export default function EpisodeView({
           .eq('id', el.approved_take_id).single()
         path = data?.storage_path ?? null
       }
+    } else {
+      // No approved take, so play the newest one. Reviewing comes before approving.
+      const { data } = await supabase.from('takes').select('storage_path')
+        .eq('element_id', el.id).order('created_at', { ascending: false }).limit(1)
+      path = data?.[0]?.storage_path ?? null
     }
     if (!path) return
     if (preview.playing === path) { preview.stop(); return }
@@ -402,23 +411,43 @@ export default function EpisodeView({
 
   /** Resolves every playable element to a signed URL so the mix can be assembled. */
   const buildClips = useCallback(async (): Promise<Clip[]> => {
-    const withAudio = positionedRef.current.filter(e =>
-      e.kind !== 'pause' && (e.series_asset_id || e.approved_take_id))
+    /*
+     * Approved audio wins, but an unapproved take still plays.
+     *
+     * This used to require approval, which meant an episode you had just generated came
+     * back silent, and the only way to hear a take was to approve it first. Reviewing is
+     * listening; approval is what you do afterwards.
+     */
+    const candidates = positionedRef.current.filter(e => e.kind !== 'pause')
+
+    const { data: allTakes } = await supabase.from('takes')
+      .select('id, element_id, storage_path, created_at')
+      .in('element_id', candidates.map(e => e.id))
+      .order('created_at', { ascending: false })
+
+    const newestByElement = new Map<string, string>()
+    const pathById = new Map<string, string>()
+    for (const t of allTakes ?? []) {
+      pathById.set(t.id, t.storage_path)
+      if (!newestByElement.has(t.element_id)) newestByElement.set(t.element_id, t.storage_path)
+    }
+
+    const withAudio = candidates.filter(e =>
+      e.series_asset_id || e.approved_take_id || newestByElement.has(e.id))
+
     if (withAudio.length === 0) {
-      toast('Nothing to play yet. Approve a take or add audio from the vault.')
+      toast('Nothing to play yet. Generate a take or add audio from the vault.')
       return []
     }
-    const takeIds = withAudio.map(e => e.approved_take_id).filter(Boolean) as string[]
-    const { data: tk } = takeIds.length
-      ? await supabase.from('takes').select('id, storage_path').in('id', takeIds)
-      : { data: [] as { id: string; storage_path: string }[] }
-    const takePath = new Map((tk ?? []).map(t => [t.id, t.storage_path]))
+    const takePath = pathById
 
     const clips: Clip[] = []
     for (const el of withAudio) {
       const path = el.series_asset_id
         ? assets.find(a => a.id === el.series_asset_id)?.storage_path
-        : takePath.get(el.approved_take_id!)
+        : el.approved_take_id
+          ? takePath.get(el.approved_take_id)
+          : newestByElement.get(el.id)
       if (!path) continue
       const url = await signedUrl(path)
       if (!url) continue
@@ -656,7 +685,7 @@ export default function EpisodeView({
                 </span>
                 <span className="row-side">
                   <span className="row-actions">
-                    {(el.series_asset_id || el.approved_take_id) && (
+                    {(el.series_asset_id || el.approved_take_id || el.status === 'generated') && (
                       <button className="icon-btn" title="Play this" aria-label="Play this"
                         data-on={!!el.approved_take_id && preview.playing !== null}
                         onClick={ev => { ev.stopPropagation(); play(el) }}>
@@ -758,10 +787,17 @@ export default function EpisodeView({
         }}
         onPlayElement={() => selectedEl && play(selectedEl)}
         onAddBlock={id => selectedEl && addBlockAround(selectedEl, id)}
+        onStopAudio={() => preview.stop()}
         onRemoveBlock={async id => { await removeBlock(id); await load() }}
         onAddVault={id => selectedEl && addVaultAsset(selectedEl, id, 'scene')}
         onExport={() => setExporting(true)}
         onDeleteEpisode={() => setDeleting(true)}
+        missingThemes={missingThemes}
+        onPlaceThemes={async () => {
+          const placed = await applyTemplate(episode.id, project.id)
+          await load()
+          toast(placed > 0 ? `${placed} placed. They are at the start and the end.` : 'Nothing to place.')
+        }}
       />
       </div>
 

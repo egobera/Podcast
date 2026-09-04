@@ -1,5 +1,5 @@
 import { admin, userFrom, ownsEpisode, json, speak, makeSound, storeTake } from './_shared'
-import { applyDirection } from '../../src/lib/direction'
+import { applyDirection, effectiveDirection } from '../../src/lib/direction'
 import { buildSoundPrompt, looksLikeRawCue } from '../../src/lib/soundprompt'
 
 /**
@@ -59,7 +59,8 @@ export default async function handler(req: Request) {
           if (el.kind === 'dialogue') {
             const ch = chars.get(el.character_id)
             if (!ch?.voice_id) throw new Error('no voice')
-            const directed = applyDirection(el.text_content, el.direction ?? '')
+            const tone = effectiveDirection(el.direction, ch.direction_notes, ch.description)
+      const directed = applyDirection(el.text_content, tone.text)
             prompt = directed.text
             audio = await speak({
               voiceId: ch.voice_id,

@@ -191,8 +191,16 @@ export default function Characters({ project, onChanged }: { project: Project; o
                   </select>
                 </div>
                 <div className="field">
-                  <label>Direction notes</label>
-                  <textarea defaultValue={c.direction_notes} onBlur={e => patch(c.id, { direction_notes: e.target.value })} />
+                  <label>Default tone</label>
+                  <textarea
+                    defaultValue={c.direction_notes || c.description}
+                    placeholder="cálida, cercana, ritmo tranquilo"
+                    onBlur={e => patch(c.id, { direction_notes: e.target.value })}
+                  />
+                  <span className="hint">
+                    Used on every line that has no direction of its own. A script directs the lines
+                    that break from the norm, not all of them.
+                  </span>
                 </div>
                 {c.source === 'cloned' && (
                   <div className="field">

@@ -3,7 +3,7 @@ import { normalize, isTimingOnly, detectRepeats, detectPairs, cueKeyword, countU
 
 import { safeName } from './files'
 import { expectedMsFrom, lengthMismatch } from './duration'
-import { applyDirection } from './direction'
+import { applyDirection, effectiveDirection } from './direction'
 import { buildSoundPrompt, defaultLengthMs, looksLikeRawCue } from './soundprompt'
 
 const cue = (id: string, idx: number, text: string, episode_id = 'ep1') =>
@@ -306,5 +306,35 @@ describe('countUnlinked', () => {
 
   it('counts a real sound the vault does not have', () => {
     expect(countUnlinked([el('1', 'sfx', 'Timbre de casa.')], [])).toBe(1)
+  })
+})
+
+describe('effectiveDirection', () => {
+  it('uses the line direction when there is one', () => {
+    const out = effectiveDirection('gritando', 'cálida, tranquila')
+    expect(out.text).toBe('gritando')
+    expect(out.fromCharacter).toBe(false)
+  })
+
+  it('falls back to the character when the line has none', () => {
+    // Most narrator lines carry no direction. Without this they were read flat.
+    const out = effectiveDirection('', 'cálida, cercana, ritmo tranquilo')
+    expect(out.text).toBe('cálida, cercana, ritmo tranquilo')
+    expect(out.fromCharacter).toBe(true)
+  })
+
+  it('never stacks the two', () => {
+    // "gritando" on top of "tranquila" would be a contradiction, not a nuance.
+    expect(effectiveDirection('gritando', 'tranquila').text).toBe('gritando')
+  })
+
+  it('uses the cast description when there are no notes', () => {
+    expect(effectiveDirection('', '', 'Voz mayor, pausada').text).toBe('Voz mayor, pausada')
+  })
+
+  it('reports nothing when neither exists', () => {
+    const out = effectiveDirection('', '', '')
+    expect(out.text).toBe('')
+    expect(out.fromCharacter).toBe(false)
   })
 })

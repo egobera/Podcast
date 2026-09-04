@@ -83,3 +83,25 @@ export const DIRECTION_HINTS = [
   'enfadado', 'emocionado', 'aliviado', 'cansado', 'extrañado', 'gritando',
   'serio', 'irónico', 'con dulzura', 'muy despacio',
 ]
+
+/**
+ * What a line should actually be told, given the character it belongs to.
+ *
+ * A script directs the lines that break from the norm, not every line. The narrator's
+ * baseline warmth is written once in the cast list, so a line with no direction of its own
+ * inherits it instead of being read flat.
+ *
+ * A line's own direction wins outright rather than stacking: a script that says "gritando"
+ * means gritando, not gritando on top of calm.
+ */
+export function effectiveDirection(
+  lineDirection: string | null | undefined,
+  characterNotes?: string | null,
+  characterDescription?: string | null,
+): { text: string; fromCharacter: boolean } {
+  const own = (lineDirection ?? '').trim()
+  if (own) return { text: own, fromCharacter: false }
+
+  const base = (characterNotes ?? '').trim() || (characterDescription ?? '').trim()
+  return { text: base, fromCharacter: !!base }
+}

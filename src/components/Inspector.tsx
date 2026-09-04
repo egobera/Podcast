@@ -1,9 +1,10 @@
+import { useState } from 'react'
 import { formatMs } from '../lib/parser'
 import { runChecks } from './ExportPanel'
 import { Play as PlayIcon, Pause as PauseIcon, Upload, Check } from './icons'
 import { usePreview } from '../lib/usePreview'
 import Comments from './Comments'
-import { applyDirection, DIRECTION_HINTS } from '../lib/direction'
+import { applyDirection, effectiveDirection, DIRECTION_HINTS } from '../lib/direction'
 import { buildSoundPrompt } from '../lib/soundprompt'
 import type { AudioElement, Character, Comment, Episode, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
@@ -28,10 +29,13 @@ interface Props {
   onPlayTake: (take: Take) => void
   onPlayElement: () => void
   onAddBlock: (blockId: string) => void
+  onStopAudio: () => void
   onRemoveBlock: (blockId: string) => void
   onAddVault: (assetId: string) => void
   onExport: () => void
   onDeleteEpisode: () => void
+  missingThemes: { id: string; name: string }[]
+  onPlaceThemes: () => void
   comments: Comment[]
   userId: string
   userEmail: string | null
@@ -97,38 +101,13 @@ export default function Inspector(p: Props) {
             </span>
           </div>
 
-          <div className="field">
-            <label>How it is said</label>
-            <input
-              key={`dir-${el.id}`}
-              defaultValue={el.direction ?? ''}
-              placeholder="nervioso, muy despacio, susurrando"
-              onBlur={e => p.onPatch({ direction: e.target.value })}
-            />
-            <div className="chips" style={{ marginTop: 6 }}>
-              {DIRECTION_HINTS.slice(0, 8).map(h => (
-                <button
-                  key={h}
-                  className="chip"
-                  onClick={() => {
-                    const now = (el.direction ?? '').trim()
-                    p.onPatch({ direction: now ? `${now}, ${h}` : h })
-                  }}
-                >
-                  {h}
-                </button>
-              ))}
-            </div>
-            {(() => {
-              const out = applyDirection(el.text_content, el.direction ?? '')
-              if (out.tags.length === 0) {
-                return el.direction
-                  ? <span className="hint">Nothing in there the model understands yet. Try a feeling or a pace.</span>
-                  : <span className="hint">Without this, the line is read flat.</span>
-              }
-              return <span className="hint">The model is told: {out.tags.join(' ')}</span>
-            })()}
-          </div>
+          <DirectionField
+            key={el.id}
+            value={el.direction ?? ''}
+            character={p.character}
+            line={el.text_content}
+            onChange={direction => p.onPatch({ direction })}
+          />
         </>
       )}
 
@@ -144,9 +123,26 @@ export default function Inspector(p: Props) {
             />
             <span className="hint">
               {built.described
-                ? `In English, ${built.seconds}s. The generator answers to concrete nouns, not to stage directions.`
+                ? 'In English. The generator answers to concrete nouns, not to stage directions.'
                 : 'Nothing in this cue was recognised, so it went through as written. Rewrite it in English as a sound.'}
             </span>
+
+            <div className="sound-controls">
+              <label htmlFor={`secs-${el.id}`}>Length</label>
+              <input
+                id={`secs-${el.id}`}
+                type="number" min={1} max={22} step={1}
+                defaultValue={Math.round((el.duration_ms || built.seconds * 1000) / 1000)}
+                onBlur={e => p.onPatch({
+                  duration_ms: Math.min(Math.max(Number(e.target.value) || 3, 1), 22) * 1000,
+                })}
+              />
+              <span className="unit">sec</span>
+              <button className="btn" data-variant="primary" disabled={p.busy}
+                onClick={() => { p.onStopAudio(); p.onGenerate() }}>
+                {p.busy ? 'Working' : p.takes.length ? 'Another take' : 'Generate'}
+              </button>
+            </div>
           </div>
         )
       })()}
@@ -245,7 +241,7 @@ export default function Inspector(p: Props) {
 
 /** What the panel shows when nothing is selected: the state of the episode. */
 function EpisodeSummary(p: Props) {
-  const { episode, elements, total, onExport } = p
+  const { episode, elements, total, onExport, onDeleteEpisode, missingThemes, onPlaceThemes } = p
   const checks = runChecks(elements, episode, total)
   const byKind = {
     dialogue: elements.filter(e => e.kind === 'dialogue').length,
@@ -282,6 +278,20 @@ function EpisodeSummary(p: Props) {
           <Bar label="Music" n={byKind.music} total={elements.length} />
         </div>
       </div>
+
+      {missingThemes.length > 0 && (
+        <div className="ip-section">
+          <span className="ip-label">Missing from this episode</span>
+          <p className="notice">
+            {missingThemes.map(t => t.name).join(' and ')} {missingThemes.length === 1 ? 'is' : 'are'} in
+            the vault but not in this episode. Episodes only pick them up when they are created,
+            so one made before the vault was filled never got them.
+          </p>
+          <button className="btn" data-variant="primary" onClick={onPlaceThemes}>
+            Place {missingThemes.length === 1 ? 'it' : 'them'} now
+          </button>
+        </div>
+      )}
 
       <div className="ip-section">
         <span className="ip-label">Before you export</span>
@@ -320,6 +330,60 @@ function Bar({ label, n, total }: { label: string; n: number; total: number }) {
         <span style={{ width: `${total ? (n / total) * 100 : 0}%` }} />
       </div>
       <span className="ip-bar-n tnum">{n}</span>
+    </div>
+  )
+}
+
+/**
+ * The tone for one line.
+ *
+ * Kept as its own component with its own state so the preview under it updates as you
+ * type. Reading straight from the row meant the hint lagged a save behind and said a line
+ * would be read flat while you were looking at the words you had just written.
+ */
+function DirectionField({
+  value, character, line, onChange,
+}: {
+  value: string
+  character: Character | undefined
+  line: string
+  onChange: (value: string) => void
+}) {
+  const [text, setText] = useState(value)
+
+  const tone = effectiveDirection(text, character?.direction_notes, character?.description)
+  const out = applyDirection(line, tone.text)
+
+  const add = (hint: string) => {
+    const next = text.trim() ? `${text.trim()}, ${hint}` : hint
+    setText(next)
+    onChange(next)
+  }
+
+  return (
+    <div className="field">
+      <label>How it is said</label>
+      <input
+        value={text}
+        placeholder={tone.fromCharacter ? tone.text : 'nervioso, muy despacio, susurrando'}
+        onChange={e => setText(e.target.value)}
+        onBlur={() => onChange(text)}
+      />
+      <div className="chips" style={{ marginTop: 6 }}>
+        {DIRECTION_HINTS.slice(0, 8).map(h => (
+          <button key={h} className="chip" onClick={() => add(h)}>{h}</button>
+        ))}
+      </div>
+
+      <span className="hint">
+        {out.tags.length > 0
+          ? <>The model is told: {out.tags.join(' ')}{tone.fromCharacter && ', from the character'}</>
+          : tone.fromCharacter
+            ? <>Falls back to {character?.name}: “{tone.text}”. Nothing in it the model reads as a feeling.</>
+            : tone.text
+              ? 'Nothing in there the model understands yet. Try a feeling or a pace.'
+              : 'No direction here and none on the character, so this line is read flat.'}
+      </span>
     </div>
   )
 }

@@ -8,6 +8,18 @@ import type { AudioElement, SeriesAsset, SeriesBlock } from './types'
  * Vault assets marked to auto place are dropped into every new episode the moment it is
  * created, already approved, because the audio exists. A new episode is never empty.
  */
+/** Vault assets the episode is missing, so an episode made before the vault was filled
+ *  can still get its themes without being recreated. */
+export async function missingTemplateAssets(episodeId: string, projectId: string) {
+  const [{ data: assets }, { data: present }] = await Promise.all([
+    supabase.from('series_assets').select('id, name, auto_place, storage_path')
+      .eq('project_id', projectId).in('auto_place', ['open', 'close']),
+    supabase.from('elements').select('series_asset_id').eq('episode_id', episodeId),
+  ])
+  const already = new Set((present ?? []).map(e => e.series_asset_id).filter(Boolean))
+  return (assets ?? []).filter(a => a.storage_path && !already.has(a.id))
+}
+
 export async function applyTemplate(episodeId: string, projectId: string) {
   const { data: assets } = await supabase
     .from('series_assets')

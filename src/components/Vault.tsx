@@ -108,6 +108,7 @@ export default function Vault({
 
   /** Music still comes from outside; effects can be made right here. */
   async function generate(asset: SeriesAsset) {
+    preview.stop()
     setBusy(asset.id)
     try {
       /*
