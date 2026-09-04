@@ -1,5 +1,6 @@
 import { admin, userFrom, ownsEpisode, json, speak, makeSound, storeTake } from './_shared'
 import { applyDirection } from '../../src/lib/direction'
+import { buildSoundPrompt } from '../../src/lib/soundprompt'
 
 /**
  * First pass generator. The -background suffix is what tells Netlify to invoke this
@@ -70,8 +71,9 @@ export default async function handler(req: Request) {
               style: ch.style,
             })
           } else {
-            prompt = el.prompt || el.text_content
-            audio = await makeSound(prompt, el.duration_ms / 1000)
+            const built = buildSoundPrompt(el.text_content, el.duration_ms)
+            prompt = el.prompt?.trim() || built.prompt
+            audio = await makeSound(prompt, built.seconds)
           }
           await storeTake(db, userId, projectId, el.id, audio, prompt, 'elevenlabs')
           done++

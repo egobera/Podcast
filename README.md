@@ -612,6 +612,39 @@ De tu episodio 1, 37 líneas traen acotación y 19 producen instrucción para el
 Todos los botones de reproducción son también de pausa, y solo suena una cosa a la vez. Pulsar en
 otro sitio detiene lo anterior en lugar de encimarlo.
 
+## Los prompts de sonido se construyen, no se copian
+
+El generador de efectos responde a sustantivos concretos en inglés. Mandarle la acotación tal cual
+era el error: *"AMBIENTE · Cocina de domingo. Radio muy bajita y alguien picando sobre una tabla. En
+bucle hasta que salen al balón"* son tres cosas a la vez, una etiqueta, una descripción y una
+instrucción de montaje, y el modelo intenta sonorizar las tres.
+
+Ahora la acotación se convierte en prompt en tres pasos: se quita la etiqueta, se corta todo lo que
+es instrucción al editor (*en bucle*, *hasta que*, *sustituye a*, *20 dB*), y se recogen los
+conceptos que se reconocen, en inglés. Lo que no se reconoce se descarta.
+
+```
+Cocina de domingo. Radio muy bajita y alguien picando sobre una tabla. En bucle…
+  ↓
+a quiet kitchen, a distant muffled radio, someone chopping vegetables on a board,
+a still sunday morning. continuous background room tone, no music, no speech.
+```
+
+Traducir palabra por palabra se probó primero y salía espanglish, que el modelo entiende peor que
+cualquiera de los dos idiomas. Por eso se reconocen conceptos enteros y se tira el resto.
+
+Los ambientes piden sala y doce segundos; los golpes puntuales piden estar secos, cerca del
+micrófono y sin cola de reverb. Si una acotación no se reconoce, el prompt sale tal cual y el
+inspector te avisa de que hay que reescribirlo a mano.
+
+## Duraciones
+
+Cada entrada de la bóveda dice cuánto debería durar, en un campo editable, y muestra al lado lo que
+dura de verdad el audio que subiste.
+
+Los valores de partida: apertura 15 seg, cierre 30 seg, camas 2 min, efectos 3 seg, entrada del
+bloque 4 seg, pulso 0,7 seg, regreso 1 seg. Se cambian escribiendo encima.
+
 ## Generar sonidos sin salir de la app
 
 Los efectos se generan desde la bóveda con el botón **Generate**: usa el nombre y la descripción de

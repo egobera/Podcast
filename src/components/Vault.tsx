@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase, uploadAudio, readDuration, signedUrl, callFunction } from '../lib/supabase'
 import { formatMs } from '../lib/parser'
 import { lengthMismatch } from '../lib/duration'
+import { defaultLengthMs } from '../lib/soundprompt'
 import { LANGUAGES, accentsFor } from '../lib/languages'
 import { useToast, AskText, Confirm, ConfirmTyped } from './ui'
 import { Play, Pause, Upload, Plus, Close } from './icons'
@@ -72,7 +73,7 @@ export default function Vault({
   async function addAsset(name: string, kind = 'sfx', auto = 'none', description = '') {
     const { error } = await supabase.from('series_assets').insert({
       project_id: project.id, name, kind, auto_place: auto,
-      description, sort: assets.length,
+      description, expected_ms: defaultLengthMs(kind), sort: assets.length,
     })
     if (error) { toast(error.message, 'bad'); return }
     load(); onChanged()
@@ -226,6 +227,22 @@ export default function Vault({
                 </div>
               )
             })()}
+
+            <div className="length-row">
+              <label htmlFor={`len-${asset.id}`}>Should last</label>
+              <input
+                id={`len-${asset.id}`}
+                type="number" min={1} max={600} step={1}
+                defaultValue={Math.round((asset.expected_ms ?? defaultLengthMs(asset.kind)) / 1000)}
+                onBlur={e => patch(asset.id, {
+                  expected_ms: Math.max(1, Number(e.target.value) || 1) * 1000,
+                })}
+              />
+              <span className="unit">sec</span>
+              {asset.duration_ms ? (
+                <span className="actual tnum">now {formatMs(asset.duration_ms)}</span>
+              ) : null}
+            </div>
 
             <label className="auto-place">
               <select value={asset.auto_place ?? 'none'}

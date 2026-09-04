@@ -1,5 +1,6 @@
 import { admin, userFrom, json, speak, makeSound, storeTake } from './_shared'
 import { applyDirection } from '../../src/lib/direction'
+import { buildSoundPrompt } from '../../src/lib/soundprompt'
 
 /** Generates one take for one element. Synchronous, so it must stay under 10 seconds. */
 export default async function handler(req: Request) {
@@ -44,9 +45,11 @@ export default async function handler(req: Request) {
         style: ch.style,
       })
     } else {
-      promptUsed = el.prompt || el.text_content
+      // A hand written prompt wins; otherwise the cue is turned into one.
+      const built = buildSoundPrompt(el.text_content, el.duration_ms)
+      promptUsed = el.prompt?.trim() || built.prompt
       provider = 'elevenlabs'
-      audio = await makeSound(promptUsed, el.duration_ms / 1000)
+      audio = await makeSound(promptUsed, built.seconds)
     }
 
     const take = await storeTake(db, userId, projectId, element_id, audio, promptUsed, provider)

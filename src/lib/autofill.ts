@@ -1,6 +1,7 @@
 import { supabase } from './supabase'
 import { normalize, isTimingOnly } from './detect'
 import { expectedMsFrom } from './duration'
+import { buildSoundPrompt, defaultLengthMs } from './soundprompt'
 import type { AudioElement, SeriesAsset } from './types'
 
 /**
@@ -68,8 +69,8 @@ export async function autofillVault(
         auto_place: 'none',
         auto: true,
         match_key: key,
-        description: `From the script. Needed ${group.elements.length} times.`,
-        expected_ms: expectedMsFrom(group.label),
+        description: buildSoundPrompt(group.label).prompt,
+        expected_ms: expectedMsFrom(group.label) ?? defaultLengthMs('sfx'),
         sort: sort++,
       }).select().single()
       if (data) { asset = data as SeriesAsset; byKey.set(key, asset); created++ }
@@ -148,8 +149,8 @@ export async function addAllCues(
     auto_place: 'none',
     auto: true,
     match_key: key,
-    description: 'From the script.',
-    expected_ms: expectedMsFrom(g.label),
+    description: buildSoundPrompt(g.label).prompt,
+    expected_ms: expectedMsFrom(g.label) ?? defaultLengthMs('sfx'),
     uses: g.ids.length,
     sort: 100 + i,
   }))

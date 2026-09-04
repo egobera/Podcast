@@ -3,6 +3,7 @@ import { normalize, isTimingOnly, detectRepeats, detectPairs, cueKeyword } from 
 import { safeName } from './files'
 import { expectedMsFrom, lengthMismatch } from './duration'
 import { applyDirection } from './direction'
+import { buildSoundPrompt, defaultLengthMs } from './soundprompt'
 
 const cue = (id: string, idx: number, text: string, episode_id = 'ep1') =>
   ({ id, idx, kind: 'sfx', text_content: text, episode_id })
@@ -206,5 +207,54 @@ describe('applyDirection', () => {
 
   it('puts the tags in front of the words, where the model reads them', () => {
     expect(applyDirection('Sí.', 'aliviado').text).toBe('[relieved] Sí.')
+  })
+})
+
+describe('buildSoundPrompt', () => {
+  it('drops the label and the instructions to the editor', () => {
+    const out = buildSoundPrompt(
+      'AMBIENTE · Cocina de domingo. Radio muy bajita. En bucle hasta que salen al balón.',
+    )
+    expect(out.prompt).not.toContain('AMBIENTE')
+    expect(out.prompt).not.toContain('bucle')
+    expect(out.prompt).toContain('kitchen')
+    expect(out.prompt).toContain('distant muffled radio')
+  })
+
+  it('never sends half translated Spanish', () => {
+    // Substituting word by word produced Spanglish, which reads worse than either language.
+    const out = buildSoundPrompt('Timbre.')
+    expect(out.described).toBe(true)
+    expect(out.prompt).toBe(
+      'doorbell ringing. single isolated sound, dry, close microphone, no music, no speech, no reverb tail.',
+    )
+  })
+
+  it('asks an ambience for room and a spot effect for none', () => {
+    expect(buildSoundPrompt('AMBIENTE · Cocina.').prompt).toContain('continuous background room tone')
+    expect(buildSoundPrompt('Timbre.').prompt).toContain('no reverb tail')
+  })
+
+  it('gives an ambience longer than a single hit by default', () => {
+    expect(buildSoundPrompt('AMBIENTE · Cocina.').seconds).toBe(12)
+    expect(buildSoundPrompt('Timbre.').seconds).toBe(3)
+  })
+
+  it('honours a length the script stated', () => {
+    expect(buildSoundPrompt('Timbre.', 8000).seconds).toBe(8)
+  })
+
+  it('flags a cue it did not understand instead of pretending', () => {
+    const out = buildSoundPrompt('Un ruido difícil de describir')
+    expect(out.described).toBe(false)
+  })
+})
+
+describe('defaultLengthMs', () => {
+  it('starts every kind of vault entry with a sensible length', () => {
+    expect(defaultLengthMs('theme_open')).toBe(15000)
+    expect(defaultLengthMs('theme_close')).toBe(30000)
+    expect(defaultLengthMs('bed')).toBe(120000)
+    expect(defaultLengthMs('sfx')).toBe(3000)
   })
 })

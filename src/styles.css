@@ -1265,3 +1265,20 @@ select.inline:hover { border-color: var(--text-3); }
 .mismatch .btn { padding: 3px 9px; font-size: var(--t-xs); }
 
 .icon-btn[data-on='true'] { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+.length-row {
+  display: flex; align-items: center; gap: 7px;
+  font-size: var(--t-xs); color: var(--text-2);
+}
+.length-row input {
+  width: 58px; border: 1px solid var(--rule-soft); border-radius: var(--r-sm);
+  padding: 4px 7px; font-size: var(--t-xs); background: var(--paper);
+  font-variant-numeric: tabular-nums;
+}
+.length-row input:focus {
+  outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-wash);
+}
+.length-row .unit { color: var(--text-3); }
+.length-row .actual {
+  margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--text-3);
+}

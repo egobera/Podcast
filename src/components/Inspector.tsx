@@ -4,6 +4,7 @@ import { Play as PlayIcon, Pause as PauseIcon, Upload, Check } from './icons'
 import { usePreview } from '../lib/usePreview'
 import Comments from './Comments'
 import { applyDirection, DIRECTION_HINTS } from '../lib/direction'
+import { buildSoundPrompt } from '../lib/soundprompt'
 import type { AudioElement, Character, Comment, Episode, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
 interface Props {
@@ -131,16 +132,24 @@ export default function Inspector(p: Props) {
         </>
       )}
 
-      {!isTemplate && !isBlock && el.kind !== 'dialogue' && (
-        <div className="field">
-          <label>Prompt</label>
-          <textarea
-            key={el.id}
-            defaultValue={el.prompt || el.text_content}
-            onBlur={e => p.onPatch({ prompt: e.target.value })}
-          />
-        </div>
-      )}
+      {!isTemplate && !isBlock && el.kind !== 'dialogue' && (() => {
+        const built = buildSoundPrompt(el.text_content, el.duration_ms)
+        return (
+          <div className="field">
+            <label>Sound prompt</label>
+            <textarea
+              key={el.id}
+              defaultValue={el.prompt || built.prompt}
+              onBlur={e => p.onPatch({ prompt: e.target.value })}
+            />
+            <span className="hint">
+              {built.described
+                ? `In English, ${built.seconds}s. The generator answers to concrete nouns, not to stage directions.`
+                : 'Nothing in this cue was recognised, so it went through as written. Rewrite it in English as a sound.'}
+            </span>
+          </div>
+        )
+      })()}
 
       {!isTemplate && (
         <div className="field">
