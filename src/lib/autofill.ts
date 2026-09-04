@@ -41,8 +41,13 @@ export async function autofillVault(
     if (key) byKey.set(key, a)
   }
 
+  /*
+   * A pause is not a sound, so it has no business in the vault. Leaving it in produced
+   * entries called "Silencio. 1 segundo" with a Generate button next to them.
+   */
   const cues = episodeElements.filter(e =>
-    e.kind !== 'dialogue' && !e.series_asset_id && e.text_content.trim().length > 2)
+    e.kind !== 'dialogue' && e.kind !== 'pause'
+    && !e.series_asset_id && e.text_content.trim().length > 2)
 
   // Group this episode's cues by their normalized wording.
   const groups = new Map<string, { label: string; elements: AudioElement[] }>()
@@ -134,7 +139,7 @@ export async function addAllCues(
 
   const groups = new Map<string, { label: string; ids: string[] }>()
   for (const cue of episodeElements) {
-    if (cue.kind === 'dialogue' || cue.series_asset_id) continue
+    if (cue.kind === 'dialogue' || cue.kind === 'pause' || cue.series_asset_id) continue
     const key = normalize(cue.text_content)
     if (!key || known.has(key) || TOO_GENERIC.test(key) || isTimingOnly(cue.text_content)) continue
     if (!groups.has(key)) groups.set(key, { label: cue.text_content.trim(), ids: [] })
@@ -155,25 +160,21 @@ export async function addAllCues(
     sort: 100 + i,
   }))
 
-  const { data: made } = await supabase.from('series_assets').insert(rows).select()
+  /*
+   * Inserting the batch in one call meant a single duplicate key threw the whole thing
+   * away, and the count returned was the number attempted rather than the number made.
+   * So it reported success for work that never happened.
+   */
+  const { data: made, error } = await supabase.from('series_assets').insert(rows).select()
+  if (error) throw new Error(error.message)
+
   for (const asset of (made ?? [])) {
     const group = groups.get(asset.match_key as string)
     if (group) {
       await supabase.from('elements').update({ series_asset_id: asset.id }).in('id', group.ids)
     }
   }
-  return rows.length
+  return (made ?? []).length
 }
 
-/** How many cues an episode has that the vault does not know about yet. */
-export function countUnlinked(episodeElements: AudioElement[], assets: SeriesAsset[]): number {
-  const known = new Set(assets.map(a => a.match_key ?? normalize(a.name)))
-  const keys = new Set<string>()
-  for (const cue of episodeElements) {
-    if (cue.kind === 'dialogue' || cue.series_asset_id) continue
-    const key = normalize(cue.text_content)
-    if (!key || known.has(key) || TOO_GENERIC.test(key) || isTimingOnly(cue.text_content)) continue
-    keys.add(key)
-  }
-  return keys.size
-}
+export { countUnlinked } from './detect'

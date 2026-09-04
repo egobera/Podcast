@@ -187,3 +187,22 @@ export function cueKeyword(text: string): string {
   const words = normalize(text).split(' ').filter(w => w.length > 3)
   return words.slice(0, 2).join(' ') || normalize(text)
 }
+
+/**
+ * How many sounds an episode needs that the vault does not know about yet.
+ * Pauses are not sounds, so they never count.
+ */
+export function countUnlinked(
+  episodeElements: { kind: string; text_content: string; series_asset_id?: string | null }[],
+  assets: { name: string; match_key?: string | null }[],
+): number {
+  const known = new Set(assets.map(a => a.match_key ?? normalize(a.name)))
+  const keys = new Set<string>()
+  for (const cue of episodeElements) {
+    if (cue.kind === 'dialogue' || cue.kind === 'pause' || cue.series_asset_id) continue
+    const key = normalize(cue.text_content)
+    if (!key || known.has(key) || isTimingOnly(cue.text_content)) continue
+    keys.add(key)
+  }
+  return keys.size
+}

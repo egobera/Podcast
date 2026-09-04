@@ -68,8 +68,14 @@ const CONCEPTS: [RegExp, string][] = [
 ]
 
 /** Ambiences want room and length; single hits want to be dry and isolated. */
-const AMBIENCE_TAIL = 'continuous background room tone, no music, no speech, recorded quietly'
-const SPOT_TAIL = 'single isolated sound, dry, close microphone, no music, no speech, no reverb tail'
+/*
+ * The generator will read a prompt aloud if the prompt reads like a sentence somebody
+ * might say. Saying so explicitly, every time, is the difference between a chair creaking
+ * and an actor announcing that a chair creaks.
+ */
+const NO_VOICE = 'sound effect only, no voice, no narration, no words, no music'
+const AMBIENCE_TAIL = `continuous background room tone, recorded quietly. ${NO_VOICE}`
+const SPOT_TAIL = `single isolated sound, dry, close microphone, no reverb tail. ${NO_VOICE}`
 
 export interface SoundPrompt {
   prompt: string
@@ -80,7 +86,7 @@ export interface SoundPrompt {
 }
 
 export function buildSoundPrompt(cue: string, expectedMs?: number | null): SoundPrompt {
-  const labelled = cue.match(/^(m[úu]sica|ambiente|sound|sfx)\s*[·:-]\s*/i)
+  const labelled = cue.match(/^(m[úu]sica|ambiente|sonido|sound|sfx|efecto)\s*[·:-]\s*/i)
   const isAmbience = /^ambiente/i.test(labelled?.[1] ?? '') || /\bambiente\b/i.test(cue)
 
   let body = labelled ? cue.slice(labelled[0].length) : cue
@@ -123,4 +129,16 @@ export function defaultLengthMs(kind: string): number {
     case 'villain': return 5000
     default: return 3000
   }
+}
+
+/**
+ * True when a stored prompt is really just the cue from the script, saved by an older
+ * version of the app or by someone clicking through the field. Those go to the generator
+ * as Spanish prose, and Spanish prose is what it reads out loud.
+ */
+export function looksLikeRawCue(prompt: string, cue: string): boolean {
+  const strip = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (strip(prompt) === strip(cue)) return true
+  // Or it never went through the builder: the builder always ends with this.
+  return !/no voice, no narration/i.test(prompt)
 }

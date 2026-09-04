@@ -132,7 +132,7 @@ export default function Inspector(p: Props) {
         </>
       )}
 
-      {!isTemplate && !isBlock && el.kind !== 'dialogue' && (() => {
+      {!isTemplate && !isBlock && el.kind !== 'dialogue' && el.kind !== 'pause' && (() => {
         const built = buildSoundPrompt(el.text_content, el.duration_ms)
         return (
           <div className="field">
@@ -170,7 +170,23 @@ export default function Inspector(p: Props) {
         onChanged={p.onCommentsChanged}
       />
 
-      {!isTemplate && !isBlock && (
+      {el.kind === 'pause' && (
+        <div className="field">
+          <label>How long the silence lasts</label>
+          <input
+            key={`pause-${el.id}`}
+            type="number" min={1} max={20} step={1}
+            defaultValue={Math.round(el.duration_ms / 1000)}
+            onBlur={e => p.onPatch({ duration_ms: Math.max(1, Number(e.target.value) || 1) * 1000 })}
+          />
+          <span className="hint">
+            Nothing is generated for a pause. It is real time on the timeline, and everything
+            after it moves when you change it.
+          </span>
+        </div>
+      )}
+
+      {!isTemplate && !isBlock && el.kind !== 'pause' && (
         <>
           <div className="ip-section">
             <span className="ip-label">Takes</span>

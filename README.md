@@ -60,7 +60,9 @@ Cuando esté listo:
 16. Otra con `supabase/migration-010-comments.sql`
 17. Otra con `supabase/migration-011-mix.sql`
 18. Otra con `supabase/migration-012-expected-length.sql`
-19. Y la última, `supabase/migration-013-direction.sql`
+19. Otra con `supabase/migration-013-direction.sql`
+20. Otra con `supabase/migration-014-clear-raw-prompts.sql`
+21. Y la última, `supabase/migration-015-clean-pause-assets.sql`
 
 El primero crea las tablas, las reglas de seguridad y el almacén de audio. El segundo añade la
 plantilla de episodio, el bloque de congelamiento y los objetivos de duración de 8 minutos. El
@@ -299,6 +301,39 @@ abrir nada.
 
 Arriba, **Pick up where you left off** muestra los tres episodios más avanzados sin terminar,
 ordenados por cuánto les queda. Es el atajo que evita navegar por la barra lateral cada vez.
+
+## Cómo escribir un guion para esta app
+
+Cuatro formas de acotación, y cada una hace algo distinto.
+
+**Diálogo con dirección.** La acotación entre paréntesis antes de la línea. Puede llevar la
+posición y la interpretación juntas: la posición se ignora, la interpretación se traduce.
+
+```
+**NILO:** *(en off, nervioso)* Espérate, espérate, espérate...
+**ABUELA:** *(después de un momento, muy despacio)* Ay.
+```
+
+**Sonido puntual.** Un sonido por acotación, con su duración. Partir "puerta, pasos y balón" en
+tres acotaciones da tres archivos limpios en vez de uno confuso.
+
+```
+*(SONIDO · Vidrio que se rompe, seco y corto. 2 seg)*
+```
+
+**Ambiente y música.** Se anclan a la escena y no empujan la duración del episodio.
+
+```
+*(AMBIENTE · Cocina, mañana de domingo, radio muy bajita)*
+*(MÚSICA · Cama de tensión)*
+```
+
+**Silencio.** No genera nada: es tiempo real en la línea de tiempo, y todo lo que viene después se
+mueve si lo cambias.
+
+```
+*(Silencio. 3 segundos.)*
+```
 
 ## Cómo se dice cada línea
 
@@ -583,6 +618,39 @@ lugar de deslizarse.
 tiñen un segundo y medio y sueltan el color, lo justo para encontrarlas sin que se convierta en
 decoración.
 
+## Cómo escribir un guion para esta app
+
+Cuatro formas de acotación, y cada una hace algo distinto.
+
+**Diálogo con dirección.** La acotación entre paréntesis antes de la línea. Puede llevar la
+posición y la interpretación juntas: la posición se ignora, la interpretación se traduce.
+
+```
+**NILO:** *(en off, nervioso)* Espérate, espérate, espérate...
+**ABUELA:** *(después de un momento, muy despacio)* Ay.
+```
+
+**Sonido puntual.** Un sonido por acotación, con su duración. Partir "puerta, pasos y balón" en
+tres acotaciones da tres archivos limpios en vez de uno confuso.
+
+```
+*(SONIDO · Vidrio que se rompe, seco y corto. 2 seg)*
+```
+
+**Ambiente y música.** Se anclan a la escena y no empujan la duración del episodio.
+
+```
+*(AMBIENTE · Cocina, mañana de domingo, radio muy bajita)*
+*(MÚSICA · Cama de tensión)*
+```
+
+**Silencio.** No genera nada: es tiempo real en la línea de tiempo, y todo lo que viene después se
+mueve si lo cambias.
+
+```
+*(Silencio. 3 segundos.)*
+```
+
 ## Cómo se dice cada línea
 
 Un guion no solo dice qué se dice, dice cómo. `*(la voz quebrándose)*`, `*(muy despacio)*`,
@@ -636,6 +704,21 @@ cualquiera de los dos idiomas. Por eso se reconocen conceptos enteros y se tira 
 Los ambientes piden sala y doce segundos; los golpes puntuales piden estar secos, cerca del
 micrófono y sin cola de reverb. Si una acotación no se reconoce, el prompt sale tal cual y el
 inspector te avisa de que hay que reescribirlo a mano.
+
+## Qué sigue haciendo falta y qué no
+
+La bóveda cuenta en cuántos episodios se usa cada sonido, y lo cuenta **en vivo** cada vez que se
+abre. Antes había un contador guardado que solo sumaba, así que al borrar un episodio todo lo que
+ese episodio había introducido seguía pareciendo igual de necesario.
+
+Cuando un sonido deja de aparecer en cualquier episodio, la bóveda lo marca y ofrece borrar todos
+los que estén en esa situación de una vez. Los personajes hacen lo mismo: si ya no tienen líneas en
+ningún episodio, se avisa.
+
+Las sintonías quedan fuera de esa cuenta a propósito. Las coloca la plantilla, no las pide un
+guion, así que una serie entre episodios se ofrecería a borrar su propia sintonía.
+
+Al borrar un episodio, el aviso dice cuántos sonidos se quedaron sin uso.
 
 ## Duraciones
 
@@ -742,6 +825,24 @@ permiso **Voices: Write** activado y sustituye `ELEVENLABS_API_KEY`.
 **"this prompt potentially doesn't follow our safety guidelines"**
 ElevenLabs bloquea diseñar voces que suenen a menores. Una voz infantil tiene que venir de la
 biblioteca de voces o de la clonación de un niño real con consentimiento por escrito.
+
+**La bóveda se llenó de entradas llamadas "Silencio. 1 segundo"**
+Corregido. Las pausas se contaban como sonidos al rellenar la bóveda. La migración 015 borra las
+que se crearon, y solo toca entradas automáticas y sin audio, así que nada de lo que subiste corre
+peligro.
+
+**"Añadidos a la bóveda" pero no aparece ninguno**
+Corregido. El alta en bloque no comprobaba si había fallado y devolvía el número de intentos, no el
+de creados. Un solo duplicado tiraba el lote entero y aun así decía que todo había ido bien.
+
+**Los efectos suenan a alguien leyendo la acotación en voz alta**
+Corregido, y tenía dos causas. La bóveda pegaba el nombre en español delante del prompt en inglés, y
+un prompt guardado por una versión antigua tenía prioridad sobre el construido. El generador lee en
+voz alta cualquier prompt que parezca una frase que alguien diría.
+
+Ahora todo prompt construido termina diciendo *no voice, no narration, no words*, y cualquier prompt
+guardado que no lleve esa firma se ignora y se reconstruye. La migración 014 limpia los que ya
+estaban en la base de datos.
 
 **No puedo crear una serie y no pasa nada al pulsar**
 Casi siempre es que falta ejecutar `migration-003-teams.sql`. Sin ella no existe el equipo al que

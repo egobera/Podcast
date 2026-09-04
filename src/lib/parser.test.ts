@@ -62,6 +62,26 @@ describe('parseScript', () => {
     expect(elements[2].gainRole).toBe('impact')
   })
 
+  it('turns a timing direction into silence, not a sound to generate', () => {
+    // These used to become sound effects, and the generator dutifully made a file of
+    // somebody's idea of silence.
+    const { elements } = parseScript('*(Silencio. 3 segundos.)*\n\n**SIRA:** Hola.')
+    expect(elements[0].kind).toBe('pause')
+    expect(elements[0].duration_ms ?? elements[0].estimatedMs).toBe(3000)
+  })
+
+  it('reads how long a pause should be from the way it is written', () => {
+    const read = (cue: string) => parseScript(`*(${cue})*`).elements[0].estimatedMs
+    expect(read('Silencio. 2 segundos.')).toBe(2000)
+    expect(read('Silencio largo.')).toBe(3000)
+    expect(read('Pausa.')).toBe(1200)
+  })
+
+  it('keeps a cue that only mentions a character as a sound, not a pause', () => {
+    const { elements } = parseScript('*(Silencio de Nilo.)*')
+    expect(elements[0].kind).not.toBe('pause')
+  })
+
   it('trusts an explicit label over the words inside the cue', () => {
     // This one read as music because it mentions a music bed in passing.
     const { elements } = parseScript(

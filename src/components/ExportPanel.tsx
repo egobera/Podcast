@@ -16,7 +16,7 @@ export function runChecks(
 ): Check[] {
   const out: Check[] = []
 
-  const unapproved = elements.filter(e => e.status !== 'approved')
+  const unapproved = elements.filter(e => e.kind !== 'pause' && e.status !== 'approved')
   if (unapproved.length) {
     out.push({
       level: 'stop',

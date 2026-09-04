@@ -55,6 +55,31 @@ function stripTags(text: string): string {
     .trim()
 }
 
+const TIMING_WORDS = /^(pausa|silencio|beat|espera|corte a silencio)/i
+
+/** True when a cue only asks for time to pass. */
+export function isTimingCue(text: string): boolean {
+  const clean = text.trim().toLowerCase()
+  if (!TIMING_WORDS.test(clean)) return false
+  // "Silencio de Nilo" is a note about a character, not an instruction to leave a gap.
+  return !/\bde\s+[a-záéíóúñ]+\b/i.test(clean.replace(/\bde\s+(dos|tres|un|una|cuatro|cinco)\b/gi, ''))
+}
+
+/** How long a pause should be, read from the way it is written. */
+export function pauseMsFrom(text: string): number {
+  const clean = text.toLowerCase()
+  const stated = clean.match(/\b(\d{1,2}|un|una|dos|tres|cuatro|cinco)\s*segundos?\b/)
+  if (stated) {
+    const words: Record<string, number> = { un: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5 }
+    const n = Number(stated[1]) || words[stated[1]] || 2
+    return n * 1000
+  }
+  if (/^corte a silencio/.test(clean)) return 1500
+  if (/\blarg/.test(clean)) return 3000
+  if (/\bbrev|\bcorto\b|\bcorta\b/.test(clean)) return 800
+  return 1200
+}
+
 /** Sounds that recur across a series and should come from the Vault, not a new generation. */
 const RECURRING = /timbre|doorbell|sinton|theme|congelamiento|freeze/i
 
@@ -157,14 +182,34 @@ export function parseScript(script: string): ParsedScript {
     if (cue) {
       const desc = cue[1].trim()
 
+      /*
+       * A pause is not a sound. "Silencio largo." tells the editor to leave a gap, and
+       * generating audio for it produced a file of somebody's idea of silence. It becomes
+       * real time on the timeline instead, with nothing to make.
+       */
+      if (isTimingCue(desc)) {
+        out.push({
+          idx: idx++,
+          scene,
+          kind: 'pause',
+          characterName: null,
+          text: desc,
+          direction: '',
+          anchor: 'line',
+          gainRole: 'auto',
+          estimatedMs: pauseMsFrom(desc),
+        })
+        continue
+      }
+
       // A cue that says there is nothing is a note to the producer, not a sound.
-      if (/^(m[uú]sica|ambiente|sound|music)\s*[·:-]\s*(ninguno|ninguna|nada|none)/i.test(desc)) continue
+      if (/^(m[uú]sica|ambiente|sonido|sound|music)\s*[·:-]\s*(ninguno|ninguna|nada|none)/i.test(desc)) continue
 
       /*
        * An explicit label wins over guessing. "AMBIENTE · Sala. La cama de tensión sigue
        * sonando" is an ambience, even though the word for a music bed appears in it.
        */
-      const labelled = desc.match(/^(m[uú]sica|ambiente|music|ambience|sound|sfx)\s*[·:-]/i)
+      const labelled = desc.match(/^(m[uú]sica|ambiente|sonido|efecto|music|ambience|sound|sfx)\s*[·:-]/i)
       const label = labelled?.[1]?.toLowerCase() ?? ''
       const isMusic = label
         ? /^(m[uú]sica|music)$/.test(label)

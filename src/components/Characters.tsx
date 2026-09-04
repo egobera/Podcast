@@ -3,6 +3,8 @@ import { supabase, callFunction } from '../lib/supabase'
 import { useToast } from './ui'
 import { accentsFor, labelFor } from '../lib/languages'
 import { parseCast } from '../lib/parser'
+import { type Usage } from '../lib/usage'
+import { loadUsage } from '../lib/usageQuery'
 import VoiceDesigner from './VoiceDesigner'
 import type { Character, Project } from '../lib/types'
 
@@ -17,6 +19,7 @@ export default function Characters({ project, onChanged }: { project: Project; o
   const toast = useToast()
   const [designing, setDesigning] = useState<Character | null>(null)
   const [filling, setFilling] = useState(false)
+  const [usage, setUsage] = useState<Usage>({ assets: new Map(), characters: new Map(), episodes: 0 })
 
   async function load() {
     const { data } = await supabase.from('characters').select('*').eq('project_id', project.id).order('name')
@@ -152,6 +155,13 @@ export default function Characters({ project, onChanged }: { project: Project; o
               defaultValue={c.description}
               onBlur={e => patch(c.id, { description: e.target.value })}
             />
+            {(() => {
+              const inEpisodes = usage.characters.get(c.id) ?? 0
+              if (usage.episodes === 0) return null
+              return inEpisodes > 0
+                ? <p className="uses tnum">Speaks in {inEpisodes} {inEpisodes === 1 ? 'episode' : 'episodes'}</p>
+                : <p className="uses orphan">No episode has lines for them any more</p>
+            })()}
             <p>
               {labelFor(project.language_code)} · {c.accent ?? project.accent}
               {c.accent && c.accent !== project.accent && ' · differs from the series'}

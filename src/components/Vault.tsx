@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase, uploadAudio, readDuration, signedUrl, callFunction } from '../lib/supabase'
 import { formatMs } from '../lib/parser'
 import { lengthMismatch } from '../lib/duration'
-import { defaultLengthMs } from '../lib/soundprompt'
+import { defaultLengthMs, buildSoundPrompt, looksLikeRawCue } from '../lib/soundprompt'
+import { orphanAssets, type Usage } from '../lib/usage'
+import { loadUsage } from '../lib/usageQuery'
 import { LANGUAGES, accentsFor } from '../lib/languages'
 import { useToast, AskText, Confirm, ConfirmTyped } from './ui'
 import { Play, Pause, Upload, Plus, Close } from './icons'
@@ -37,6 +39,8 @@ export default function Vault({
   const [addingBlock, setAddingBlock] = useState(false)
   const [trim, setTrim] = useState<SeriesAsset | null>(null)
   const [seriesCues, setSeriesCues] = useState<CueLike[]>([])
+  const [usage, setUsage] = useState<Usage>({ assets: new Map(), characters: new Map(), episodes: 0 })
+  const [cleaning, setCleaning] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [remove, setRemove] = useState<SeriesAsset | null>(null)
   const inputs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -50,6 +54,7 @@ export default function Vault({
     ])
     setAssets((a ?? []) as SeriesAsset[])
     setBlocks((b ?? []) as SeriesBlock[])
+    setUsage(await loadUsage(project.id))
   }, [project.id])
 
   useEffect(() => { load() }, [load])
@@ -105,7 +110,13 @@ export default function Vault({
   async function generate(asset: SeriesAsset) {
     setBusy(asset.id)
     try {
-      const prompt = [asset.name, asset.description].filter(Boolean).join('. ')
+      /*
+       * The description holds the built English prompt. Gluing the Spanish name in front
+       * of it was enough to make the generator read the name out loud.
+       */
+      const built = buildSoundPrompt(asset.name, asset.expected_ms)
+      const stored = (asset.description ?? '').trim()
+      const prompt = stored && !looksLikeRawCue(stored, asset.name) ? stored : built.prompt
       await callFunction('generate-sound', {
         asset_id: asset.id,
         prompt,
@@ -177,6 +188,44 @@ export default function Vault({
         </p>
       </div>
 
+      {(() => {
+        const orphans = orphanAssets(assets, usage)
+        if (orphans.length === 0) return null
+        const withAudio = orphans.filter(o => o.storage_path).length
+        return (
+          <div className="orphans">
+            <div className="orphans-main">
+              <span className="sugg-title">
+                {orphans.length} {orphans.length === 1 ? 'sound is' : 'sounds are'} no longer
+                used by any episode
+              </span>
+              <span className="sugg-body">
+                They came from a script that has since been deleted or rewritten.
+                {withAudio > 0 && ` ${withAudio} of them still have audio you paid to make, so keep them if a later episode will need them.`}
+              </span>
+            </div>
+            <button className="btn" disabled={cleaning}
+              onClick={async () => {
+                setCleaning(true)
+                try {
+                  const paths = orphans.map(o => o.storage_path).filter(Boolean) as string[]
+                  await supabase.from('series_assets').delete().in('id', orphans.map(o => o.id))
+                  if (paths.length) await supabase.storage.from('audio').remove(paths)
+                  await load()
+                  onChanged()
+                  toast(`${orphans.length} removed from the vault.`)
+                } catch (e) {
+                  toast(e instanceof Error ? e.message : 'Could not remove them', 'bad')
+                } finally {
+                  setCleaning(false)
+                }
+              }}>
+              {cleaning ? 'Removing' : `Remove all ${orphans.length}`}
+            </button>
+          </div>
+        )
+      })()}
+
       {assets.length === 0 && (
         <div className="empty">
           Nothing here yet. Add whatever repeats across your episodes: a theme, a bed, a station
@@ -201,12 +250,21 @@ export default function Vault({
               defaultValue={asset.description}
               onBlur={e => patch(asset.id, { description: e.target.value })}
             />
-            {asset.uses > 0 && (
-              <span className="uses tnum">
-                used {asset.uses} {asset.uses === 1 ? 'time' : 'times'}
-                {asset.expected_ms ? ` · script asks for ${formatMs(asset.expected_ms)}` : ''}
-              </span>
-            )}
+            {(() => {
+              const inEpisodes = usage.assets.get(asset.id) ?? 0
+              const placed = asset.auto_place === 'open' || asset.auto_place === 'close'
+              if (placed) return null
+              if (inEpisodes > 0) {
+                return (
+                  <span className="uses tnum">
+                    in {inEpisodes} {inEpisodes === 1 ? 'episode' : 'episodes'}
+                  </span>
+                )
+              }
+              return usage.episodes > 0
+                ? <span className="uses orphan">No episode uses this any more</span>
+                : null
+            })()}
 
             {(() => {
               if (!asset.storage_path || !asset.expected_ms || !asset.duration_ms) return null

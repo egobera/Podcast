@@ -1282,3 +1282,21 @@ select.inline:hover { border-color: var(--text-3); }
 .length-row .actual {
   margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--text-3);
 }
+
+/* A pause is silence, so it reads as absence rather than as another cue. */
+.row[data-kind='pause'] .row-text {
+  font-style: italic; color: var(--text-3); font-size: var(--t-sm);
+}
+.row[data-kind='pause'] .row-who { opacity: .55; }
+
+.uses.orphan { color: var(--alert); }
+
+.orphans {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px; margin-bottom: 22px;
+  border: 1px solid var(--rule-soft); border-left: 2px solid var(--alert);
+  border-radius: 0 var(--r-md) var(--r-md) 0;
+  background: var(--alert-wash);
+}
+.orphans-main { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.orphans .btn { flex: none; }

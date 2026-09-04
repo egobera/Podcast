@@ -12,6 +12,7 @@ import BottomPanel from './BottomPanel'
 import TrimEditor from './TrimEditor'
 import { Confirm, ConfirmTyped, Keys, useToast } from './ui'
 import { deleteEpisode } from '../lib/deletion'
+import { loadUsage } from '../lib/usageQuery'
 import { autofillVault, seedVault } from '../lib/autofill'
 import ExportPanel from './ExportPanel'
 import { Play as PlayIcon, Pause as PauseIcon, Check as CheckIcon } from './icons'
@@ -163,7 +164,8 @@ export default function EpisodeView({
           gain_role: p.gainRole,
           direction: p.direction,
           duration_ms: old?.duration_ms ?? p.estimatedMs,
-          status: old?.status === 'approved' ? 'approved' : 'missing',
+          // A pause is silence. There is nothing to generate, so it is done on arrival.
+          status: p.kind === 'pause' || old?.status === 'approved' ? 'approved' : 'missing',
           approved_take_id: old?.approved_take_id ?? null,
           prompt: old?.prompt ?? '',
         }
@@ -400,7 +402,8 @@ export default function EpisodeView({
 
   /** Resolves every playable element to a signed URL so the mix can be assembled. */
   const buildClips = useCallback(async (): Promise<Clip[]> => {
-    const withAudio = positionedRef.current.filter(e => e.series_asset_id || e.approved_take_id)
+    const withAudio = positionedRef.current.filter(e =>
+      e.kind !== 'pause' && (e.series_asset_id || e.approved_take_id))
     if (withAudio.length === 0) {
       toast('Nothing to play yet. Approve a take or add audio from the vault.')
       return []
@@ -638,7 +641,9 @@ export default function EpisodeView({
                 onClick={() => { setSelected(isOpen ? null : el.id); if (!isOpen) loadTakes(el.id) }}
               >
                 <span className="row-who">
-                  {char?.name ?? (isTemplate ? 'theme' : isBlock ? 'block' : el.kind === 'music' ? 'music' : 'sound')}
+                  {char?.name ?? (isTemplate ? 'theme' : isBlock ? 'block'
+                    : el.kind === 'pause' ? 'pause'
+                      : el.kind === 'music' ? 'music' : 'sound')}
                 </span>
                 <span className="row-text">
                   {el.text_content}
@@ -841,7 +846,12 @@ export default function EpisodeView({
           onConfirm={async () => {
             try {
               const files = await deleteEpisode(episode.id)
-              toast(`${episode.title} deleted, along with ${files} audio files.`)
+              const after = await loadUsage(project.id)
+              const stranded = assets.filter(a =>
+                a.auto_place !== 'open' && a.auto_place !== 'close' && !after.assets.has(a.id)).length
+              toast(stranded > 0
+                ? `${episode.title} deleted with ${files} audio files. ${stranded} vault sounds are now unused; the vault will offer to clear them.`
+                : `${episode.title} deleted, along with ${files} audio files.`)
               onDeleted()
             } catch (e) {
               toast(e instanceof Error ? e.message : 'Could not delete the episode', 'bad')

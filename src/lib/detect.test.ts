@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { normalize, isTimingOnly, detectRepeats, detectPairs, cueKeyword } from './detect'
+import { normalize, isTimingOnly, detectRepeats, detectPairs, cueKeyword, countUnlinked } from './detect'
+
 import { safeName } from './files'
 import { expectedMsFrom, lengthMismatch } from './duration'
 import { applyDirection } from './direction'
-import { buildSoundPrompt, defaultLengthMs } from './soundprompt'
+import { buildSoundPrompt, defaultLengthMs, looksLikeRawCue } from './soundprompt'
 
 const cue = (id: string, idx: number, text: string, episode_id = 'ep1') =>
   ({ id, idx, kind: 'sfx', text_content: text, episode_id })
@@ -226,7 +227,8 @@ describe('buildSoundPrompt', () => {
     const out = buildSoundPrompt('Timbre.')
     expect(out.described).toBe(true)
     expect(out.prompt).toBe(
-      'doorbell ringing. single isolated sound, dry, close microphone, no music, no speech, no reverb tail.',
+      'doorbell ringing. single isolated sound, dry, close microphone, no reverb tail. ' +
+      'sound effect only, no voice, no narration, no words, no music.',
     )
   })
 
@@ -256,5 +258,53 @@ describe('defaultLengthMs', () => {
     expect(defaultLengthMs('theme_close')).toBe(30000)
     expect(defaultLengthMs('bed')).toBe(120000)
     expect(defaultLengthMs('sfx')).toBe(3000)
+  })
+})
+
+describe('looksLikeRawCue', () => {
+  const cue = 'SONIDO · Silla de madera que se tambalea. 2 seg'
+
+  it('spots the cue itself saved as a prompt', () => {
+    expect(looksLikeRawCue(cue, cue)).toBe(true)
+  })
+
+  it('spots a Spanish stage direction left over from an old import', () => {
+    // Sending this made the generator read the direction aloud.
+    expect(looksLikeRawCue('La silla se tambalea. Nilo cae.', cue)).toBe(true)
+  })
+
+  it('keeps a prompt that went through the builder', () => {
+    expect(looksLikeRawCue(buildSoundPrompt(cue).prompt, cue)).toBe(false)
+  })
+
+  it('keeps a prompt written by hand that says no voice', () => {
+    expect(looksLikeRawCue('wooden chair wobbling, dry, no voice, no narration', cue)).toBe(false)
+  })
+})
+
+describe('the built prompt always forbids speech', () => {
+  it('says so for a spot effect and for an ambience', () => {
+    expect(buildSoundPrompt('Timbre.').prompt).toContain('no voice, no narration')
+    expect(buildSoundPrompt('AMBIENTE · Cocina.').prompt).toContain('no voice, no narration')
+  })
+})
+
+describe('countUnlinked', () => {
+  const el = (id: string, kind: string, text: string) => ({
+    id, episode_id: 'e', idx: 0, kind, text_content: text,
+    series_asset_id: null,
+  }) as never
+
+  it('never counts a pause as a sound the vault needs', () => {
+    // These became vault entries called "Silencio. 1 segundo" with a Generate button.
+    const n = countUnlinked(
+      [el('1', 'pause', 'Silencio. 1 segundo.'), el('2', 'pause', 'Silencio. 3 segundos.')],
+      [],
+    )
+    expect(n).toBe(0)
+  })
+
+  it('counts a real sound the vault does not have', () => {
+    expect(countUnlinked([el('1', 'sfx', 'Timbre de casa.')], [])).toBe(1)
   })
 })

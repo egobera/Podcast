@@ -1,4 +1,4 @@
-export type ElementKind = 'dialogue' | 'sfx' | 'ambience' | 'music'
+export type ElementKind = 'dialogue' | 'sfx' | 'ambience' | 'music' | 'pause'
 export type ElementStatus = 'missing' | 'generated' | 'approved' | 'stale'
 export type Anchor = 'line' | 'scene'
 export type GainRole = 'auto' | 'voice' | 'ambience' | 'spot' | 'impact' | 'bed' | 'theme'

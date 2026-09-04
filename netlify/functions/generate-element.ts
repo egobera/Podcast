@@ -1,6 +1,6 @@
 import { admin, userFrom, json, speak, makeSound, storeTake } from './_shared'
 import { applyDirection } from '../../src/lib/direction'
-import { buildSoundPrompt } from '../../src/lib/soundprompt'
+import { buildSoundPrompt, looksLikeRawCue } from '../../src/lib/soundprompt'
 
 /** Generates one take for one element. Synchronous, so it must stay under 10 seconds. */
 export default async function handler(req: Request) {
@@ -45,9 +45,14 @@ export default async function handler(req: Request) {
         style: ch.style,
       })
     } else {
-      // A hand written prompt wins; otherwise the cue is turned into one.
+      /*
+       * A hand written prompt wins, but only if it is really one. A prompt left over from
+       * an older import is the Spanish cue itself, and sending that produces a voice
+       * reading the stage direction out loud.
+       */
       const built = buildSoundPrompt(el.text_content, el.duration_ms)
-      promptUsed = el.prompt?.trim() || built.prompt
+      const stored = el.prompt?.trim() ?? ''
+      promptUsed = stored && !looksLikeRawCue(stored, el.text_content) ? stored : built.prompt
       provider = 'elevenlabs'
       audio = await makeSound(promptUsed, built.seconds)
     }

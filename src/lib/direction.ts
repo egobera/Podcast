@@ -66,13 +66,12 @@ export function applyDirection(line: string, direction: string): Directed {
 
   // A slow direction gets breaks at the sentence joins, where an actor would breathe.
   for (const [re, ms] of PACE) {
-    if (re.test(direction)) {
-      text = text.replace(
-        /([.?!])\s+(?=[A-ZÁÉÍÓÚÑ¿¡])/g,
-        `$1 <break time="${(ms / 1000).toFixed(1)}s" /> `,
-      )
-      break
-    }
+    if (!re.test(direction)) continue
+    const gap = `<break time="${(ms / 1000).toFixed(1)}s" />`
+    const spaced = text.replace(/([.?!])\s+(?=[A-ZÁÉÍÓÚÑ¿¡])/g, `$1 ${gap} `)
+    // A single short line has no joins to slow down, so the pause goes in front of it.
+    text = spaced === text ? `${gap} ${text}` : spaced
+    break
   }
 
   return { text, tags }

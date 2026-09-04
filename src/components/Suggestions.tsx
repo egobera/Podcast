@@ -4,7 +4,8 @@ import { detectRepeats, detectPairs, cueKeyword, type CueLike } from '../lib/det
 import { useToast } from './ui'
 import { Plus, Close } from './icons'
 import type { AudioElement, Project, SeriesAsset } from '../lib/types'
-import { addAllCues, countUnlinked } from '../lib/autofill'
+import { addAllCues } from '../lib/autofill'
+import { countUnlinked } from '../lib/detect'
 
 /**
  * Proposes, never acts.
@@ -137,10 +138,17 @@ export default function Suggestions({
           <button className="btn" disabled={busy === 'all'}
             onClick={async () => {
               setBusy('all')
-              const n = await addAllCues(project.id, fullElements)
-              setBusy(null)
-              onApplied()
-              toast(`${n} sounds added to the vault.`)
+              try {
+                const n = await addAllCues(project.id, fullElements)
+                onApplied()
+                toast(n > 0
+                  ? `${n} sounds added to the vault.`
+                  : 'Nothing new to add. The vault already had them all.')
+              } catch (e) {
+                toast(e instanceof Error ? e.message : 'Could not add them', 'bad')
+              } finally {
+                setBusy(null)
+              }
             }}>
             <Plus size={13} /> Add them all
           </button>
