@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { normalize, isTimingOnly, detectRepeats, detectPairs, cueKeyword } from './detect'
 import { safeName } from './files'
+import { expectedMsFrom, lengthMismatch } from './duration'
+import { applyDirection } from './direction'
 
 const cue = (id: string, idx: number, text: string, episode_id = 'ep1') =>
   ({ id, idx, kind: 'sfx', text_content: text, episode_id })
@@ -138,5 +140,71 @@ describe('safeName', () => {
     for (const name of ['a b/c".mp3', 'Ω Ω.wav', '../../etc/passwd.mp3']) {
       expect(safeName(name)).not.toMatch(/[\s/\\'"]/)
     }
+  })
+})
+
+describe('expectedMsFrom', () => {
+  it('reads the ways a script states a length', () => {
+    expect(expectedMsFrom('MÚSICA · Motivo del Coleccionista. 4 segundos.')).toBe(4000)
+    expect(expectedMsFrom('Sintonía de apertura, 15 seg')).toBe(15000)
+    expect(expectedMsFrom('Cama emocional, 2 minutos en bucle')).toBe(120000)
+    expect(expectedMsFrom('Corte de 1:30')).toBe(90000)
+  })
+
+  it('says nothing when the script does not state one', () => {
+    expect(expectedMsFrom('Timbre.')).toBeNull()
+    expect(expectedMsFrom('AMBIENTE · Cocina de domingo, en bucle')).toBeNull()
+  })
+})
+
+describe('lengthMismatch', () => {
+  it('stays quiet when the audio is close enough', () => {
+    expect(lengthMismatch(15400, 15000)).toBeNull()
+    expect(lengthMismatch(4300, 4000)).toBeNull()
+  })
+
+  it('speaks up when a generated track runs long', () => {
+    // Suno hands back a minute when the theme needs fifteen seconds.
+    const off = lengthMismatch(62000, 15000)
+    expect(off?.longer).toBe(true)
+    expect(off?.diff).toBe(47000)
+  })
+
+  it('speaks up when it runs short too', () => {
+    expect(lengthMismatch(8000, 15000)?.longer).toBe(false)
+  })
+})
+
+describe('applyDirection', () => {
+  it('leaves a line alone when there is no direction', () => {
+    const out = applyDirection('Fui yo.', '')
+    expect(out.text).toBe('Fui yo.')
+    expect(out.tags).toEqual([])
+  })
+
+  it('turns a feeling into an audio tag', () => {
+    expect(applyDirection('Y traté de pegarlo.', 'la voz quebrándose').tags).toEqual(['[crying]'])
+    expect(applyDirection('Otra vez no.', 'suspirando').tags).toEqual(['[sighs]'])
+    expect(applyDirection('Bueno. No.', 'muy bajito').tags).toEqual(['[whispers]'])
+  })
+
+  it('ignores a direction that only says where the actor is', () => {
+    // "desde la cocina" is blocking, not performance. Tagging it would be inventing.
+    expect(applyDirection('Nilo, la abuela llega a las dos.', 'desde la cocina').tags).toEqual([])
+  })
+
+  it('caps the tags so a line does not become an impression', () => {
+    const out = applyDirection('Hola.', 'nervioso, asustado, llorando, gritando, enfadado')
+    expect(out.tags.length).toBeLessThanOrEqual(3)
+  })
+
+  it('turns a slow direction into pauses rather than a tag', () => {
+    const out = applyDirection('Diez. Nueve. Ocho.', 'muy despacio, sin prisa')
+    expect(out.text).toContain('<break time="0.7s" />')
+    expect(out.text.match(/<break/g)?.length).toBe(2)
+  })
+
+  it('puts the tags in front of the words, where the model reads them', () => {
+    expect(applyDirection('Sí.', 'aliviado').text).toBe('[relieved] Sí.')
   })
 })

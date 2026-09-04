@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { supabase, uploadAudio, readDuration, signedUrl } from '../lib/supabase'
+import { supabase, uploadAudio, readDuration, signedUrl, callFunction } from '../lib/supabase'
 import { formatMs } from '../lib/parser'
+import { lengthMismatch } from '../lib/duration'
 import { LANGUAGES, accentsFor } from '../lib/languages'
 import { useToast, AskText, Confirm, ConfirmTyped } from './ui'
-import { Play, Upload, Plus, Close } from './icons'
+import { Play, Pause, Upload, Plus, Close } from './icons'
+import { usePreview } from '../lib/usePreview'
 import TrimEditor from './TrimEditor'
 import ManualNote from './ManualNote'
 import Suggestions from './Suggestions'
@@ -38,6 +40,7 @@ export default function Vault({
   const [remove, setRemove] = useState<SeriesAsset | null>(null)
   const inputs = useRef<Record<string, HTMLInputElement | null>>({})
   const toast = useToast()
+  const preview = usePreview()
 
   const load = useCallback(async () => {
     const [{ data: a }, { data: b }] = await Promise.all([
@@ -97,9 +100,30 @@ export default function Vault({
     }
   }
 
+  /** Music still comes from outside; effects can be made right here. */
+  async function generate(asset: SeriesAsset) {
+    setBusy(asset.id)
+    try {
+      const prompt = [asset.name, asset.description].filter(Boolean).join('. ')
+      await callFunction('generate-sound', {
+        asset_id: asset.id,
+        prompt,
+        seconds: asset.expected_ms ? asset.expected_ms / 1000 : undefined,
+      })
+      await load()
+      onChanged()
+      toast(`${asset.name} generated. Listen and regenerate if it is not right.`)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not generate that sound', 'bad')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function play(path: string) {
+    if (preview.playing === path) { preview.stop(); return }
     const url = await signedUrl(path)
-    if (url) new Audio(url).play()
+    if (url) preview.toggle(path, url)
   }
 
   async function setLanguage(fields: Partial<Project>) {
@@ -125,7 +149,8 @@ export default function Vault({
     <div className="page">
       <h2>Series vault</h2>
       <p className="lede">
-        Audio that belongs to the whole series, not to one episode. It fills itself as you read
+        Audio that belongs to the whole series, not to one episode. Effects can be generated here;
+        music comes from outside. It fills itself as you read
         scripts: anything a script needs more than once lands here, and anything already here gets
         connected automatically the next time an episode asks for it.
         {assets.length > 0 && ` ${withAudio} of ${assets.length} filled.`}
@@ -176,8 +201,31 @@ export default function Vault({
               onBlur={e => patch(asset.id, { description: e.target.value })}
             />
             {asset.uses > 0 && (
-              <span className="uses tnum">used {asset.uses} {asset.uses === 1 ? 'time' : 'times'}</span>
+              <span className="uses tnum">
+                used {asset.uses} {asset.uses === 1 ? 'time' : 'times'}
+                {asset.expected_ms ? ` · script asks for ${formatMs(asset.expected_ms)}` : ''}
+              </span>
             )}
+
+            {(() => {
+              if (!asset.storage_path || !asset.expected_ms || !asset.duration_ms) return null
+              const off = lengthMismatch(asset.duration_ms, asset.expected_ms)
+              if (!off) return null
+              return (
+                <div className="mismatch">
+                  <span>
+                    This is {formatMs(asset.duration_ms)} but the script asks for{' '}
+                    {formatMs(asset.expected_ms)}, {formatMs(Math.abs(off.diff))}{' '}
+                    {off.longer ? 'too long' : 'too short'}.
+                  </span>
+                  {off.longer && (
+                    <button className="btn" data-variant="quiet" onClick={() => setTrim(asset)}>
+                      Trim it
+                    </button>
+                  )}
+                </div>
+              )
+            })()}
 
             <label className="auto-place">
               <select value={asset.auto_place ?? 'none'}
@@ -191,19 +239,35 @@ export default function Vault({
             <div className="btn-row" style={{ marginTop: 'auto', paddingTop: 8 }}>
               {asset.storage_path ? (
                 <>
-                  <button className="icon-btn" aria-label="Play" onClick={() => play(asset.storage_path!)}>
-                    <Play size={12} />
+                  <button className="icon-btn" data-on={preview.playing === asset.storage_path}
+                    aria-label={preview.playing === asset.storage_path ? 'Stop' : 'Play'}
+                    onClick={() => play(asset.storage_path!)}>
+                    {preview.playing === asset.storage_path ? <Pause size={12} /> : <Play size={12} />}
                   </button>
                   <span className="dur tnum">{formatMs(asset.duration_ms ?? 0)}</span>
                   <button className="btn" data-variant="quiet" onClick={() => setTrim(asset)}>Trim</button>
+                  {asset.kind === 'sfx' && (
+                    <button className="btn" data-variant="quiet" disabled={busy === asset.id}
+                      onClick={() => generate(asset)}>
+                      {busy === asset.id ? 'Working' : 'Again'}
+                    </button>
+                  )}
                   <button className="btn" data-variant="quiet"
                     onClick={() => inputs.current[asset.id]?.click()}>Replace</button>
                 </>
               ) : (
-                <button className="btn" data-variant="primary" disabled={busy === asset.id}
-                  onClick={() => inputs.current[asset.id]?.click()}>
-                  <Upload size={13} /> {busy === asset.id ? 'Uploading' : 'Upload'}
-                </button>
+                <>
+                  {asset.kind === 'sfx' && (
+                    <button className="btn" data-variant="primary" disabled={busy === asset.id}
+                      onClick={() => generate(asset)}>
+                      {busy === asset.id ? 'Working' : 'Generate'}
+                    </button>
+                  )}
+                  <button className="btn" disabled={busy === asset.id}
+                    onClick={() => inputs.current[asset.id]?.click()}>
+                    <Upload size={13} /> Upload
+                  </button>
+                </>
               )}
               <input ref={el => { inputs.current[asset.id] = el }} type="file" accept="audio/*" hidden
                 onChange={e => { const f = e.target.files?.[0]; if (f) upload(asset, f); e.target.value = '' }} />

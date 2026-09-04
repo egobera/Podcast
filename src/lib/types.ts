@@ -51,6 +51,7 @@ export interface SeriesAsset {
   match_key: string | null
   uses: number
   duration_ms: number | null
+  expected_ms: number | null
   pulse_count: number | null
   provider: string | null
   license_note: string | null
@@ -126,6 +127,7 @@ export interface AudioElement {
   duration_ms: number
   gain_role: GainRole
   gain_db: number
+  direction: string
   status: ElementStatus
   approved_take_id: string | null
 }

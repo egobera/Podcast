@@ -17,6 +17,12 @@ describe('parseScript', () => {
     expect(elements[1].characterName).toBeNull()
   })
 
+  it('keeps the stage direction instead of throwing it away', () => {
+    const { elements } = parseScript('**NILO:** *(la voz quebrándose)* Y traté de pegarlo.')
+    expect(elements[0].direction).toBe('la voz quebrándose')
+    expect(elements[0].text).toBe('Y traté de pegarlo.')
+  })
+
   it('strips markdown and stage directions from spoken text', () => {
     // This one has bitten us twice. If it regresses, ElevenLabs reads the direction aloud.
     const { elements } = parseScript('**NILO:** *(en off, tranquilo)* Diez. Nueve. Ocho.')

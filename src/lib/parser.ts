@@ -24,6 +24,8 @@ export interface ParsedElement {
   kind: ElementKind
   characterName: string | null
   text: string
+  /** The stage direction that preceded the line, kept instead of discarded. */
+  direction: string
   anchor: Anchor
   gainRole: GainRole
   estimatedMs: number
@@ -176,6 +178,7 @@ export function parseScript(script: string): ParsedScript {
         kind: isMusic ? 'music' : isAmbience ? 'ambience' : 'sfx',
         characterName: null,
         text: desc,
+        direction: '',
         anchor: isAmbience || isMusic ? 'scene' : 'line',
         gainRole: isMusic
           ? 'bed'
@@ -194,12 +197,12 @@ export function parseScript(script: string): ParsedScript {
       const name = speech[1].replace(/[*_]/g, '').trim()
       // "**NILO:** *(en off, tranquilo)* Diez..." leaves markdown and a stage direction
       // in front of the words. Both have to go, or they get spoken out loud.
-      const body = speech[2]
-        .replace(/^\*+/, '')
-        .replace(/\*+$/, '')
-        .trim()
-        .replace(/^\*{0,2}\([^)]*\)\*{0,2}\s*/, '')
-        .trim()
+      const stripped = speech[2].replace(/^\*+/, '').replace(/\*+$/, '').trim()
+
+      // "*(en off, tranquilo)* Diez..." carries an instruction that used to be thrown away.
+      const aside = stripped.match(/^\*{0,2}\(([^)]*)\)\*{0,2}\s*/)
+      const direction = aside ? aside[1].trim() : ''
+      const body = (aside ? stripped.slice(aside[0].length) : stripped).trim()
       const clean = stripTags(body)
       if (!clean) continue
       out.push({
@@ -210,6 +213,7 @@ export function parseScript(script: string): ParsedScript {
         text: body,
         anchor: 'line',
         gainRole: 'voice',
+        direction,
         estimatedMs: estimateSpeechMs(body),
       })
     }

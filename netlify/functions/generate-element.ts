@@ -1,4 +1,5 @@
 import { admin, userFrom, json, speak, makeSound, storeTake } from './_shared'
+import { applyDirection } from '../../src/lib/direction'
 
 /** Generates one take for one element. Synchronous, so it must stay under 10 seconds. */
 export default async function handler(req: Request) {
@@ -29,11 +30,13 @@ export default async function handler(req: Request) {
     if (el.kind === 'dialogue') {
       const { data: ch } = await db.from('characters').select('*').eq('id', el.character_id).single()
       if (!ch?.voice_id) return json({ error: 'This character has no voice set yet.' }, 400)
-      promptUsed = el.text_content
+      // The stage direction becomes audio tags and pauses before the words are sent.
+      const directed = applyDirection(el.text_content, el.direction ?? '')
+      promptUsed = directed.text
       provider = 'elevenlabs'
       audio = await speak({
         voiceId: ch.voice_id,
-        text: el.text_content,
+        text: directed.text,
         modelId: ch.model,
         languageCode,
         stability: ch.stability,

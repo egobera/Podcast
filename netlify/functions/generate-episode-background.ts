@@ -1,4 +1,5 @@
 import { admin, userFrom, ownsEpisode, json, speak, makeSound, storeTake } from './_shared'
+import { applyDirection } from '../../src/lib/direction'
 
 /**
  * First pass generator. The -background suffix is what tells Netlify to invoke this
@@ -57,10 +58,11 @@ export default async function handler(req: Request) {
           if (el.kind === 'dialogue') {
             const ch = chars.get(el.character_id)
             if (!ch?.voice_id) throw new Error('no voice')
-            prompt = el.text_content
+            const directed = applyDirection(el.text_content, el.direction ?? '')
+            prompt = directed.text
             audio = await speak({
               voiceId: ch.voice_id,
-              text: el.text_content,
+              text: directed.text,
               modelId: ch.model,
               languageCode,
               stability: ch.stability,

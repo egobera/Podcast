@@ -14,7 +14,8 @@ import { Confirm, ConfirmTyped, Keys, useToast } from './ui'
 import { deleteEpisode } from '../lib/deletion'
 import { autofillVault, seedVault } from '../lib/autofill'
 import ExportPanel from './ExportPanel'
-import { Play as PlayIcon, Check as CheckIcon } from './icons'
+import { Play as PlayIcon, Pause as PauseIcon, Check as CheckIcon } from './icons'
+import { usePreview } from '../lib/usePreview'
 import type { Clip } from '../lib/player'
 import type { AudioElement, Character, Comment, Episode, Job, Project, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
@@ -46,11 +47,14 @@ export default function EpisodeView({
   const [askGenerate, setAskGenerate] = useState<number | null>(null)
   const [exporting, setExporting] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [run, setRun] = useState<{ done: number; failed: number; total: number; error: string } | null>(null)
+  const cancelRun = useRef(false)
   const [trimming, setTrimming] = useState<{ path: string; title: string } | null>(null)
   /** Rows added by a block or the vault, marked briefly so the eye can find them. */
   const [justAdded, setJustAdded] = useState<Set<string>>(new Set())
   const [filter, setFilter] = useState<'all' | 'todo' | 'review' | 'done'>('all')
   const toast = useToast()
+  const preview = usePreview()
   const uploadInput = useRef<HTMLInputElement | null>(null)
   const uploadTarget = useRef<string | null>(null)
 
@@ -157,6 +161,7 @@ export default function EpisodeView({
           origin: 'script',
           anchor: p.anchor,
           gain_role: p.gainRole,
+          direction: p.direction,
           duration_ms: old?.duration_ms ?? p.estimatedMs,
           status: old?.status === 'approved' ? 'approved' : 'missing',
           approved_take_id: old?.approved_take_id ?? null,
@@ -279,25 +284,51 @@ export default function EpisodeView({
     }
   }
 
+  /**
+   * The first pass runs from the browser, one element at a time.
+   *
+   * It used to be handed to a Netlify background function, which needs a paid plan and,
+   * worse, was written to answer immediately and finish the work afterwards. The runtime
+   * freezes a function the moment it responds, so the work never happened and the counter
+   * sat at zero forever.
+   *
+   * Driving it from here is slower per call but it works on any plan, the progress is real
+   * because it counts finished calls, and it can be stopped halfway.
+   */
   async function runFirstPass() {
-    try {
-      const pending = elements.filter(e => e.status === 'missing' || e.status === 'stale').length
+    const pending = elements.filter(e => e.status === 'missing' || e.status === 'stale')
+    if (pending.length === 0) { toast('Nothing left to generate.'); return }
 
-      const { data: created, error } = await supabase.from('jobs')
-        .insert({ episode_id: episode.id, status: 'queued', total: pending })
-        .select().single()
-      if (error) { toast(`Could not start the run: ${error.message}`, 'bad'); return }
+    cancelRun.current = false
+    setRun({ done: 0, failed: 0, total: pending.length, error: '' })
 
-      setJob(created as Job)
+    const queue = [...pending]
+    let done = 0
+    let failed = 0
+    let lastError = ''
 
-      // Fires and forgets: a background function replies 202 with no body.
-      await callFunction('generate-episode-background', {
-        episode_id: episode.id,
-        job_id: (created as Job).id,
-      })
-    } catch (e) {
-      toast(e instanceof Error ? e.message : 'Could not start the run', 'bad')
-    }
+    // Two at a time. More and ElevenLabs starts refusing.
+    const workers = Array.from({ length: 2 }, async () => {
+      while (queue.length && !cancelRun.current) {
+        const el = queue.shift()!
+        try {
+          await callFunction('generate-element', { element_id: el.id })
+          done++
+        } catch (e) {
+          failed++
+          lastError = e instanceof Error ? e.message : String(e)
+        }
+        setRun({ done, failed, total: pending.length, error: lastError })
+      }
+    })
+
+    await Promise.all(workers)
+    await load()
+    setRun(null)
+
+    if (cancelRun.current) { toast(`Stopped. ${done} generated.`); return }
+    if (failed > 0) toast(`${done} generated, ${failed} failed. ${lastError}`, 'bad')
+    else toast(`${done} takes ready to review.`)
   }
 
   async function approve(el: AudioElement, take: Take, advance = false) {
@@ -360,8 +391,9 @@ export default function EpisodeView({
       }
     }
     if (!path) return
+    if (preview.playing === path) { preview.stop(); return }
     const url = await signedUrl(path)
-    if (url) new Audio(url).play()
+    if (url) preview.toggle(path, url)
   }
 
   const positionedRef = useRef<(AudioElement & { start_ms: number })[]>([])
@@ -540,17 +572,22 @@ export default function EpisodeView({
         <span className="meter-text" style={{ color: inRange ? 'var(--blue)' : 'var(--alert)' }}>
           {formatMs(total)} / {formatMs(episode.target_min_ms)} to {formatMs(episode.target_max_ms)}
         </span>
-        <button
-          className="btn" data-variant="primary"
-          disabled={!!job && job.status === 'running'}
-          onClick={() => {
-            const pending = elements.filter(e => e.status === 'missing' || e.status === 'stale').length
-            if (pending === 0) { toast('Nothing left to generate.'); return }
-            setAskGenerate(pending)
-          }}
-        >
-          {job && job.status === 'running' ? `Generating ${job.done}/${job.total}` : 'Generate first pass'}
-        </button>
+        {run ? (
+          <button className="btn" onClick={() => { cancelRun.current = true }}>
+            Stop · {run.done + run.failed}/{run.total}
+          </button>
+        ) : (
+          <button
+            className="btn" data-variant="primary"
+            onClick={() => {
+              const pending = elements.filter(e => e.status === 'missing' || e.status === 'stale').length
+              if (pending === 0) { toast('Nothing left to generate.'); return }
+              setAskGenerate(pending)
+            }}
+          >
+            Generate first pass
+          </button>
+        )}
         <button className="btn" onClick={() => setExporting(true)}>Export</button>
       </div>
 
@@ -563,8 +600,8 @@ export default function EpisodeView({
 
         {error && <p className="error">{error}</p>}
         {notice && <p className="notice">{notice}</p>}
-        {job && job.failed > 0 && (
-          <p className="notice">{job.failed} elements failed and were left untouched.</p>
+        {run && run.error && (
+          <p className="error">Last failure: {run.error}</p>
         )}
 
         {visible.length === 0 && (
@@ -616,7 +653,10 @@ export default function EpisodeView({
                   <span className="row-actions">
                     {(el.series_asset_id || el.approved_take_id) && (
                       <button className="icon-btn" title="Play this" aria-label="Play this"
-                        onClick={ev => { ev.stopPropagation(); play(el) }}><PlayIcon size={12} /></button>
+                        data-on={!!el.approved_take_id && preview.playing !== null}
+                        onClick={ev => { ev.stopPropagation(); play(el) }}>
+                        <PlayIcon size={12} />
+                      </button>
                     )}
                     {el.status === 'generated' && (
                       <button className="icon-btn" title="Approve the newest take"
@@ -707,8 +747,9 @@ export default function EpisodeView({
         onUpload={() => { if (selectedEl) { uploadTarget.current = selectedEl.id; uploadInput.current?.click() } }}
         onApprove={t => selectedEl && approve(selectedEl, t)}
         onPlayTake={async t => {
+          if (preview.playing === t.storage_path) { preview.stop(); return }
           const url = await signedUrl(t.storage_path)
-          if (url) new Audio(url).play()
+          if (url) preview.toggle(t.storage_path, url)
         }}
         onPlayElement={() => selectedEl && play(selectedEl)}
         onAddBlock={id => selectedEl && addBlockAround(selectedEl, id)}

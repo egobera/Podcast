@@ -1,7 +1,9 @@
 import { formatMs } from '../lib/parser'
 import { runChecks } from './ExportPanel'
-import { Play as PlayIcon, Upload, Check } from './icons'
+import { Play as PlayIcon, Pause as PauseIcon, Upload, Check } from './icons'
+import { usePreview } from '../lib/usePreview'
 import Comments from './Comments'
+import { applyDirection, DIRECTION_HINTS } from '../lib/direction'
 import type { AudioElement, Character, Comment, Episode, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
 interface Props {
@@ -38,6 +40,7 @@ interface Props {
 
 export default function Inspector(p: Props) {
   const { element: el } = p
+  const preview = usePreview()
 
   if (!el) return <EpisodeSummary {...p} />
 
@@ -58,7 +61,8 @@ export default function Inspector(p: Props) {
 
       {hasAudio && (
         <button className="btn ip-play" onClick={p.onPlayElement}>
-          <PlayIcon size={12} /> Play this
+          {preview.playing ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
+          {preview.playing ? 'Stop' : 'Play this'}
         </button>
       )}
 
@@ -82,14 +86,49 @@ export default function Inspector(p: Props) {
       )}
 
       {el.kind === 'dialogue' && !isTemplate && (
-        <div className="ip-row">
-          <span className="ip-label">Voice</span>
-          <span className="ip-value">
-            {p.character?.voice_id
-              ? `${p.character.name} · locked preset`
-              : 'No voice set yet'}
-          </span>
-        </div>
+        <>
+          <div className="ip-row">
+            <span className="ip-label">Voice</span>
+            <span className="ip-value">
+              {p.character?.voice_id
+                ? `${p.character.name} · locked preset`
+                : 'No voice set yet'}
+            </span>
+          </div>
+
+          <div className="field">
+            <label>How it is said</label>
+            <input
+              key={`dir-${el.id}`}
+              defaultValue={el.direction ?? ''}
+              placeholder="nervioso, muy despacio, susurrando"
+              onBlur={e => p.onPatch({ direction: e.target.value })}
+            />
+            <div className="chips" style={{ marginTop: 6 }}>
+              {DIRECTION_HINTS.slice(0, 8).map(h => (
+                <button
+                  key={h}
+                  className="chip"
+                  onClick={() => {
+                    const now = (el.direction ?? '').trim()
+                    p.onPatch({ direction: now ? `${now}, ${h}` : h })
+                  }}
+                >
+                  {h}
+                </button>
+              ))}
+            </div>
+            {(() => {
+              const out = applyDirection(el.text_content, el.direction ?? '')
+              if (out.tags.length === 0) {
+                return el.direction
+                  ? <span className="hint">Nothing in there the model understands yet. Try a feeling or a pace.</span>
+                  : <span className="hint">Without this, the line is read flat.</span>
+              }
+              return <span className="hint">The model is told: {out.tags.join(' ')}</span>
+            })()}
+          </div>
+        </>
       )}
 
       {!isTemplate && !isBlock && el.kind !== 'dialogue' && (
@@ -133,8 +172,11 @@ export default function Inspector(p: Props) {
                   <span className="take-name">
                     {p.takes.length - i} · {formatMs(t.duration_ms)}
                   </span>
-                  <button className="icon-btn" aria-label="Play take" onClick={() => p.onPlayTake(t)}>
-                    <PlayIcon size={11} />
+                  <button className="icon-btn"
+                    data-on={preview.playing === t.storage_path}
+                    aria-label={preview.playing === t.storage_path ? 'Stop take' : 'Play take'}
+                    onClick={() => p.onPlayTake(t)}>
+                    {preview.playing === t.storage_path ? <PauseIcon size={11} /> : <PlayIcon size={11} />}
                   </button>
                   <button className="icon-btn" aria-label="Approve take" data-on={el.approved_take_id === t.id}
                     onClick={() => p.onApprove(t)}>

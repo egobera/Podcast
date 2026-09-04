@@ -354,8 +354,12 @@ input, textarea, select { font: inherit; color: inherit; }
   border-left: 1px solid var(--rule-soft);
   padding: 28px 28px 40px;
   display: flex; flex-direction: column; gap: 16px;
-  max-height: calc(100vh - 47px);
+  /* The bottom panel floats over everything, so the inspector has to stop above it or
+     its last control is unreachable. */
+  max-height: calc(100vh - 47px - 168px);
   overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 28px;
   background: linear-gradient(180deg, var(--paper) 0%, #f6f8fa 100%);
 }
 
@@ -1250,3 +1254,14 @@ select.inline:hover { border-color: var(--text-3); }
   box-shadow: none; padding: 4px 9px;
 }
 .clip-tools .btn:hover { background: var(--ink-1); color: var(--ink-text-hi); }
+
+.mismatch {
+  display: flex; align-items: flex-start; gap: 8px; flex-wrap: wrap;
+  font-size: var(--t-xs); line-height: 1.5; color: #5b4a2e;
+  background: var(--alert-wash); border-left: 2px solid var(--alert);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  padding: 8px 10px;
+}
+.mismatch .btn { padding: 3px 9px; font-size: var(--t-xs); }
+
+.icon-btn[data-on='true'] { background: var(--blue); border-color: var(--blue); color: #fff; }

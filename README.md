@@ -58,7 +58,9 @@ Cuando esté listo:
 14. Otra con `supabase/migration-008-suggestions.sql`
 15. Otra con `supabase/migration-009-autofill-vault.sql`
 16. Otra con `supabase/migration-010-comments.sql`
-17. Y la última, `supabase/migration-011-mix.sql`
+17. Otra con `supabase/migration-011-mix.sql`
+18. Otra con `supabase/migration-012-expected-length.sql`
+19. Y la última, `supabase/migration-013-direction.sql`
 
 El primero crea las tablas, las reglas de seguridad y el almacén de audio. El segundo añade la
 plantilla de episodio, el bloque de congelamiento y los objetivos de duración de 8 minutos. El
@@ -297,6 +299,30 @@ abrir nada.
 
 Arriba, **Pick up where you left off** muestra los tres episodios más avanzados sin terminar,
 ordenados por cuánto les queda. Es el atajo que evita navegar por la barra lateral cada vez.
+
+## Cómo se dice cada línea
+
+Un guion no solo dice qué se dice, dice cómo. `*(la voz quebrándose)*`, `*(muy despacio)*`,
+`*(suspirando)*`. Todo eso se descartaba al leer el guion, y por eso el resultado sonaba plano.
+
+Ahora cada línea guarda su acotación y se traduce a lo que el modelo entiende antes de generar:
+
+| En el guion | Lo que recibe el modelo |
+|---|---|
+| la voz quebrándose | `[crying]` |
+| suspirando | `[sighs]` |
+| muy bajito | `[whispers]` |
+| recitando de memoria, aburrido | `[bored]` |
+| muy despacio, sin prisa | pausas de 0,7 seg entre frases |
+
+Las acotaciones de posición, como *desde la cocina* o *en off*, no generan nada. Son indicaciones
+de puesta en escena, no de interpretación, y etiquetarlas sería inventar.
+
+En el inspector puedes editar la acotación de cualquier línea, con atajos para las más comunes, y
+debajo se ve exactamente qué se le está diciendo al modelo. Como máximo tres etiquetas por línea:
+más, y la interpretación se convierte en una caricatura.
+
+De tu episodio 1, 37 líneas traen acotación y 19 producen instrucción para el modelo.
 
 ## Escuchar el episodio
 
@@ -557,6 +583,52 @@ lugar de deslizarse.
 tiñen un segundo y medio y sueltan el color, lo justo para encontrarlas sin que se convierta en
 decoración.
 
+## Cómo se dice cada línea
+
+Un guion no solo dice qué se dice, dice cómo. `*(la voz quebrándose)*`, `*(muy despacio)*`,
+`*(suspirando)*`. Todo eso se descartaba al leer el guion, y por eso el resultado sonaba plano.
+
+Ahora cada línea guarda su acotación y se traduce a lo que el modelo entiende antes de generar:
+
+| En el guion | Lo que recibe el modelo |
+|---|---|
+| la voz quebrándose | `[crying]` |
+| suspirando | `[sighs]` |
+| muy bajito | `[whispers]` |
+| recitando de memoria, aburrido | `[bored]` |
+| muy despacio, sin prisa | pausas de 0,7 seg entre frases |
+
+Las acotaciones de posición, como *desde la cocina* o *en off*, no generan nada. Son indicaciones
+de puesta en escena, no de interpretación, y etiquetarlas sería inventar.
+
+En el inspector puedes editar la acotación de cualquier línea, con atajos para las más comunes, y
+debajo se ve exactamente qué se le está diciendo al modelo. Como máximo tres etiquetas por línea:
+más, y la interpretación se convierte en una caricatura.
+
+De tu episodio 1, 37 líneas traen acotación y 19 producen instrucción para el modelo.
+
+## Escuchar
+
+Todos los botones de reproducción son también de pausa, y solo suena una cosa a la vez. Pulsar en
+otro sitio detiene lo anterior en lugar de encimarlo.
+
+## Generar sonidos sin salir de la app
+
+Los efectos se generan desde la bóveda con el botón **Generate**: usa el nombre y la descripción de
+la entrada como prompt y la duración que pide el guion. **Again** genera otra versión.
+
+La música sigue viniendo de fuera, porque ElevenLabs no la hace. Ahí el flujo es generar en Suno,
+subir y recortar.
+
+## Cuando el audio no dura lo que pide el guion
+
+Si una indicación dice *4 segundos*, *15 seg* o *1:30*, ese número se guarda junto al asset. Al
+subir el audio, la bóveda compara y avisa si no cuadra, con un acceso directo a recortarlo.
+
+Es el caso constante con música generada: pides quince segundos de sintonía y Suno devuelve un
+minuto. Tolera hasta un 20% de diferencia antes de decir nada, porque una cama de dos minutos no
+tiene que durar exactamente dos minutos.
+
 ## Mezclar desde el panel inferior
 
 Cada carril lleva su propio fader, con el nivel en decibelios al lado. Se guarda en el episodio, así
@@ -620,9 +692,11 @@ Versión antigua del archivo. Usa la del paquete actual, que borra cada polític
 Ya no existe: toda la generación va directa a ElevenLabs. Actualiza el código y borra
 `MONID_API_KEY` de las variables si quieres.
 
-**La tanda se queda generando sin avanzar**
-Mira el aviso al terminar: ahora guarda el motivo del último fallo. Casi siempre es un permiso que
-falta en la clave de ElevenLabs, o un personaje sin voz asignada.
+**La tanda se quedaba en 0 sin avanzar**
+Corregido, y era un error de diseño. La tanda se enviaba a una función de fondo escrita para
+responder de inmediato y terminar el trabajo después, pero el entorno congela una función en cuanto
+responde, así que el trabajo nunca ocurría. Ahora la tanda corre desde el navegador, dos elementos
+a la vez, con progreso real y un botón para pararla. Ya no hace falta plan de pago en Netlify.
 
 **"Failed to execute 'json' on 'Response'" al generar la tanda**
 Corregido. Una función de fondo de Netlify responde 202 con el cuerpo vacío, y el cliente intentaba

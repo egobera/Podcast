@@ -1,5 +1,6 @@
 import { supabase } from './supabase'
 import { normalize, isTimingOnly } from './detect'
+import { expectedMsFrom } from './duration'
 import type { AudioElement, SeriesAsset } from './types'
 
 /**
@@ -68,6 +69,7 @@ export async function autofillVault(
         auto: true,
         match_key: key,
         description: `From the script. Needed ${group.elements.length} times.`,
+        expected_ms: expectedMsFrom(group.label),
         sort: sort++,
       }).select().single()
       if (data) { asset = data as SeriesAsset; byKey.set(key, asset); created++ }
@@ -83,8 +85,11 @@ export async function autofillVault(
       ...(ready ? { status: 'approved', duration_ms: asset.duration_ms ?? 3000 } : {}),
     }).in('id', ids)
 
+    // A later script may be the one that states the length.
+    const expected = asset.expected_ms ?? expectedMsFrom(group.label)
     await supabase.from('series_assets')
-      .update({ uses: (asset.uses ?? 0) + ids.length }).eq('id', asset.id)
+      .update({ uses: (asset.uses ?? 0) + ids.length, expected_ms: expected })
+      .eq('id', asset.id)
 
     linked += ids.length
   }
@@ -144,6 +149,7 @@ export async function addAllCues(
     auto: true,
     match_key: key,
     description: 'From the script.',
+    expected_ms: expectedMsFrom(g.label),
     uses: g.ids.length,
     sort: 100 + i,
   }))
