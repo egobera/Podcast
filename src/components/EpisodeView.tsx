@@ -918,6 +918,7 @@ export default function EpisodeView({
           <span><Keys>g</Keys> new take</span>
           <span><Keys>n</Keys> next gap</span>
           <span><Keys>⌘Z</Keys> undo</span>
+          <span><Keys>+</Keys><Keys>−</Keys><Keys>0</Keys> zoom the timeline</span>
         </div>
 
         <ManualNote topic="fine-edit" />

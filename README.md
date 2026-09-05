@@ -655,6 +655,14 @@ hace una vez y sirve para las cinco temporadas.
 **Se añade lo que se repite.** Cualquier sonido que el guion pida más de una vez entra en la bóveda
 como entrada vacía, esperando audio.
 
+**La música y los ambientes entran siempre**, aunque el guion los use una sola vez. Una cama o una
+habitación son reutilizables por naturaleza: una pieza que suena una vez en este episodio suena una
+vez en todos. Exigirles que se repitieran los dejaba atrapados dentro de un guion, que es justo
+donde el audio de una serie nunca debe vivir.
+
+Del nombre se quita la etiqueta y la nota de montaje, así que una acotación larga se guarda como
+**Cama de juego** y no como la frase entera.
+
 **Se ofrece el resto en un clic.** Los que aparecen una sola vez no se añaden solos, porque una
 mención no demuestra que algo se repita y una bóveda llena de sonidos únicos es una bóveda peor.
 Aparecen agrupados bajo el guion con un botón para meterlos todos.
@@ -1111,6 +1119,21 @@ pasos.
 
 Como en cualquier editor, hacer algo nuevo después de deshacer descarta lo que había por delante.
 Conservarlo permitiría que un rehacer posterior pisara trabajo hecho después.
+
+## El panel se agranda y hace zoom
+
+Es donde ocurre la edición, así que se puede estirar arrastrando su borde superior, y recuerda la
+altura entre sesiones. Los carriles crecen con él: un panel más alto solo sirve si las ondas
+también crecen.
+
+**Zoom.** Rueda del ratón sobre los carriles para acercar alrededor del puntero, `shift` y rueda
+para desplazarse. Con teclado, `+` acerca sobre el cursor de reproducción, `−` aleja y `0`
+vuelve al episodio entero. El contador de la barra dice cuántos segundos hay en pantalla.
+
+Ocho minutos enteros dejan una línea de diálogo en cuatro píxeles: sirve para orientarse y no para
+colocar nada. Acercando hasta dos segundos, cada sílaba ocupa espacio suficiente para trabajar.
+
+**El minimapa** aparece bajo los carriles al acercar, y dice en qué parte del episodio estás.
 
 ## Mover y recortar en la línea de tiempo
 

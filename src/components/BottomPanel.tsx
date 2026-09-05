@@ -7,7 +7,14 @@ const LANE_LABEL: Record<Lane, string> = { voice: 'Voice', music: 'Music', effec
 /* Three hues inside the blue family: cerulean for voice, indigo for music, steel for sound.
    Distinct enough to read apart at 20px tall, close enough to belong together. */
 const LANE_COLOR: Record<Lane, string> = { voice: '#3f86c4', music: '#6470b4', effects: '#4a8a9e' }
-const LANE_H = 30
+const LANE_MIN = 26
+const LANE_MAX = 74
+const PANEL_MIN = 150
+const PANEL_MAX = 620
+const PANEL_KEY = 'estudio.panelHeight'
+
+/** The shortest window you can zoom into. Below this the ruler stops meaning anything. */
+const MIN_SPAN_MS = 2000
 const HEAD_W = 96
 
 function tc(ms: number) {
@@ -64,6 +71,43 @@ export default function BottomPanel({
   const [soloed, setSoloed] = useState<Set<Lane>>(new Set())
   const [collapsed, setCollapsed] = useState(false)
   const laneGain = episode.lane_gain ?? {}
+
+  /*
+   * The panel is where the editing happens, so it is resizable and it remembers.
+   * Lane height follows it: a taller panel is only useful if the waveforms grow too.
+   */
+  const [panelHeight, setPanelHeight] = useState(() => {
+    const saved = Number(localStorage.getItem(PANEL_KEY))
+    return saved >= PANEL_MIN && saved <= PANEL_MAX ? saved : 210
+  })
+  const laneH = Math.round(Math.min(Math.max((panelHeight - 96) / LANES.length, LANE_MIN), LANE_MAX))
+
+  /*
+   * What part of the episode is on screen.
+   *
+   * Showing all eight minutes at once means a line of dialogue is four pixels wide, which
+   * is fine for finding your way around and useless for placing anything. The window can
+   * be narrowed to a couple of seconds, and everything else measures against it.
+   */
+  const [view, setView] = useState<{ start: number; span: number } | null>(null)
+  const span = view ? view.span : Math.max(total, 1)
+  const viewStart = view ? view.start : 0
+
+  const clampView = useCallback((start: number, wanted: number) => {
+    const full = Math.max(total, 1)
+    const s = Math.min(Math.max(wanted, MIN_SPAN_MS), full)
+    return { start: Math.min(Math.max(start, 0), Math.max(full - s, 0)), span: s }
+  }, [total])
+
+  const zoomAround = useCallback((factor: number, atMs?: number) => {
+    const full = Math.max(total, 1)
+    const current = view ?? { start: 0, span: full }
+    const centre = atMs ?? current.start + current.span / 2
+    const wanted = current.span * factor
+    if (wanted >= full) { setView(null); return }
+    const ratio = (centre - current.start) / current.span
+    setView(clampView(centre - wanted * ratio, wanted))
+  }, [total, view, clampView])
   const [clips, setClips] = useState<Clip[]>([])
   const [width, setWidth] = useState(800)
   const raf = useRef(0)
@@ -75,6 +119,8 @@ export default function BottomPanel({
   const pendingEdges = useRef<{ lead: number; tail: number } | null>(null)
   const headRef = useRef(0)
   const groupDelta = useRef<number | null>(null)
+  const panelHeightRef = useRef(0)
+  panelHeightRef.current = panelHeight
   const setDragOffset = (v: number | null) => {
     lastDelta.current = v === null ? null : v - (elements.find(e => e.id === dragging)?.offset_ms ?? 0)
     setDragOffsetState(v)
@@ -91,10 +137,16 @@ export default function BottomPanel({
    */
   const moveHead = useCallback((ms: number) => {
     const el = playhead.current
-    if (el) el.style.transform = `translateX(${(ms / Math.max(total, 1)) * widthRef.current}px)`
-  }, [total])
+    if (el) {
+      const at = ((ms - viewRef.current.start) / viewRef.current.span) * widthRef.current
+      el.style.transform = `translateX(${at}px)`
+      el.style.opacity = at < -4 || at > widthRef.current + 4 ? '0' : '1'
+    }
+  }, [])
   const widthRef = useRef(800)
   widthRef.current = width
+  const viewRef = useRef({ start: 0, span: 1 })
+  viewRef.current = { start: viewStart, span }
 
   useEffect(() => () => { player.current?.destroy(); cancelAnimationFrame(raf.current) }, [])
 
@@ -172,7 +224,7 @@ export default function BottomPanel({
     const cv = canvas.current
     if (!cv || width <= 0) return
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
-    const h = LANES.length * LANE_H
+    const h = LANES.length * laneH
     cv.width = width * dpr
     cv.height = h * dpr
     cv.style.width = `${width}px`
@@ -181,16 +233,15 @@ export default function BottomPanel({
     g.setTransform(dpr, 0, 0, dpr, 0, 0)
     g.clearRect(0, 0, width, h)
 
-    const span = Math.max(total, 1)
-    const px = (ms: number) => (ms / span) * width
+    const px = (ms: number) => ((ms - viewStart) / span) * width
 
     LANES.forEach((lane, li) => {
-      const top = li * LANE_H
-      const laneH = LANE_H - 8
+      const top = li * laneH
+      const barH = laneH - 8
       const y = top + 4
 
       g.fillStyle = '#15202c'
-      roundRect(g, 0, y, width, laneH, 4)
+      roundRect(g, 0, y, width, barH, 4)
       g.fill()
 
       const silenced = muted.has(lane) || (soloed.size > 0 && !soloed.has(lane))
@@ -203,15 +254,15 @@ export default function BottomPanel({
 
         g.globalAlpha = silenced ? 0.22 : c.ready ? 1 : 0.34
         g.fillStyle = base
-        roundRect(g, x, y + 1, w, laneH - 2, 2)
+        roundRect(g, x, y + 1, w, barH - 2, 2)
         g.fill()
 
         const peaks = c.url ? player.current?.peaksFor(c.url) : null
         if (peaks && w > 4) {
           g.globalAlpha = silenced ? 0.3 : 0.85
           g.fillStyle = '#0d1620'
-          const mid = y + laneH / 2
-          const half = (laneH - 4) / 2
+          const mid = y + barH / 2
+          const half = (barH - 4) / 2
           const cols = Math.min(Math.floor(w), peaks.length)
           for (let i = 0; i < cols; i++) {
             const p = peaks[Math.floor((i / cols) * peaks.length)]
@@ -234,7 +285,7 @@ export default function BottomPanel({
             g.beginPath()
             g.moveTo(x, y + 1)
             g.lineTo(x + fw, y + 1)
-            g.lineTo(x, y + laneH - 1)
+            g.lineTo(x, y + barH - 1)
             g.closePath()
             g.fill()
           }
@@ -243,7 +294,7 @@ export default function BottomPanel({
             g.beginPath()
             g.moveTo(x + w, y + 1)
             g.lineTo(x + w - fw, y + 1)
-            g.lineTo(x + w, y + laneH - 1)
+            g.lineTo(x + w, y + barH - 1)
             g.closePath()
             g.fill()
           }
@@ -253,16 +304,16 @@ export default function BottomPanel({
           g.globalAlpha = 1
           g.strokeStyle = c.id === selectedId ? '#e6f0fa' : '#7fb0e0'
           g.lineWidth = 1
-          roundRect(g, x + 0.5, y + 1.5, Math.max(w - 1, 2), laneH - 3, 2)
+          roundRect(g, x + 0.5, y + 1.5, Math.max(w - 1, 2), barH - 3, 2)
           g.stroke()
         }
       }
       g.globalAlpha = 1
     })
-  }, [width, total, drawable, muted, soloed, selectedId])
+  }, [width, total, drawable, muted, soloed, selectedId, viewStart, span, laneH, elements, extraSelected])
 
   useEffect(() => { draw() })
-  useEffect(() => { moveHead(head) }, [width, collapsed, moveHead, head])
+  useEffect(() => { moveHead(head) }, [width, collapsed, moveHead, head, viewStart, span, panelHeight])
 
   function tick() {
     const ms = player.current?.currentMs ?? 0
@@ -343,6 +394,9 @@ export default function BottomPanel({
       if (e.code === 'Space') { e.preventDefault(); state === 'playing' ? pause() : start() }
       if (e.key === 'ArrowLeft' && e.shiftKey) { e.preventDefault(); jump(-1) }
       if (e.key === 'ArrowRight' && e.shiftKey) { e.preventDefault(); jump(1) }
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomAround(0.6, headRef.current) }
+      if (e.key === '-') { e.preventDefault(); zoomAround(1.6) }
+      if (e.key === '0') { e.preventDefault(); setView(null) }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -357,10 +411,10 @@ export default function BottomPanel({
    */
   function onPointerDown(e: React.PointerEvent) {
     const rect = laneArea.current!.getBoundingClientRect()
-    const toMs = (clientX: number) => ((clientX - rect.left) / rect.width) * total
+    const toMs = (clientX: number) => viewStart + ((clientX - rect.left) / rect.width) * span
 
     const y = e.clientY - rect.top
-    const lane = LANES[Math.floor(y / LANE_H)]
+    const lane = LANES[Math.floor(y / laneH)]
     const ms = toMs(e.clientX)
 
     const hit = lane && drawable.find(c =>
@@ -378,7 +432,7 @@ export default function BottomPanel({
         : [el]
       const startOffsets = new Map(group.map(g => [g.id, g.offset_ms ?? 0]))
 
-      const pxPerMs = rect.width / total
+      const pxPerMs = rect.width / span
       const nearLeft = Math.abs(ms - hit.startMs) * pxPerMs < 6
       const nearRight = Math.abs(ms - (hit.startMs + hit.durationMs)) * pxPerMs < 6
       const mode: 'move' | 'left' | 'right' =
@@ -403,7 +457,7 @@ export default function BottomPanel({
           .flatMap(c => [c.startMs, c.startMs + c.durationMs]),
       ]
       const snap = (value: number) => {
-        const reach = total * 0.006
+        const reach = span * 0.006
         let best = value
         let closest = reach
         for (const m of magnets) {
@@ -476,13 +530,46 @@ export default function BottomPanel({
     if (selected) onGain(selected.id, Math.max(-24, Math.min(12, (selected.gain_db ?? 0) + delta)))
   }
 
-  const span = Math.max(total, 1)
   const step = stepFor(span, width)
   const ticks: number[] = []
-  for (let s = 0; s * 1000 <= span; s += step) ticks.push(s * 1000)
+  for (let t = Math.ceil(viewStart / 1000 / step) * step; t * 1000 <= viewStart + span; t += step) {
+    ticks.push(t * 1000)
+  }
+
+  /** Wheel zooms around the pointer; shift or a horizontal wheel pans. */
+  function onWheel(e: React.WheelEvent) {
+    const rect = laneArea.current?.getBoundingClientRect()
+    if (!rect) return
+    if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      const delta = (e.deltaX || e.deltaY) * span * 0.0015
+      setView(clampView(viewStart + delta, span))
+      return
+    }
+    const at = viewStart + ((e.clientX - rect.left) / rect.width) * span
+    zoomAround(e.deltaY > 0 ? 1.25 : 0.8, at)
+  }
+
+  /** Drag the top edge to make the panel taller. */
+  function onResize(e: React.PointerEvent) {
+    e.preventDefault()
+    const startY = e.clientY
+    const startH = panelHeight
+    const move = (ev: PointerEvent) => {
+      const next = Math.min(Math.max(startH + (startY - ev.clientY), PANEL_MIN), PANEL_MAX)
+      setPanelHeight(next)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      localStorage.setItem(PANEL_KEY, String(panelHeightRef.current))
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   return (
     <div className="panel" data-collapsed={collapsed}>
+      {!collapsed && <div className="panel-grip" onPointerDown={onResize} title="Drag to resize" />}
       <div className="panel-bar">
         <button className="play" onClick={() => (state === 'playing' ? pause() : start())}
           disabled={state === 'loading'} aria-label={state === 'playing' ? 'Pause' : 'Play episode'}>
@@ -541,6 +628,14 @@ export default function BottomPanel({
           </div>
         )}
 
+        <div className="zoom-tools">
+          <button className="tp-btn" onClick={() => zoomAround(1.6)} title="Zoom out">−</button>
+          <span className="zoom-read tnum">{(span / 1000).toFixed(span < 20000 ? 1 : 0)}s</span>
+          <button className="tp-btn" onClick={() => zoomAround(0.6, head)} title="Zoom in on the playhead">+</button>
+          <button className="tp-btn" onClick={() => setView(null)} title="Show the whole episode"
+            disabled={!view}>Fit</button>
+        </div>
+
         <div className="tp-right">
           <div className="segmented dark" role="group" aria-label="Monitoring">
             <button aria-pressed={monitor === 'studio'} onClick={() => setMonitor('studio')}>Studio</button>
@@ -558,7 +653,7 @@ export default function BottomPanel({
           <div className="lane-heads">
             <div className="ruler-spacer" />
             {LANES.map(lane => (
-              <div className="lane-head" key={lane} style={{ height: LANE_H }}>
+              <div className="lane-head" key={lane} style={{ height: laneH }}>
                 <span className="lane-name">{LANE_LABEL[lane]}</span>
                 <button
                   className="lane-btn" data-on={muted.has(lane)}
@@ -585,7 +680,7 @@ export default function BottomPanel({
             ))}
           </div>
 
-          <div className="lane-area" ref={laneArea} onPointerDown={onPointerDown}>
+          <div className="lane-area" ref={laneArea} onPointerDown={onPointerDown} onWheel={onWheel}>
             <div className="ruler">
               {ticks.map(ms => (
                 <span className="tick" key={ms} style={{ left: `${(ms / span) * 100}%` }}>
@@ -594,6 +689,14 @@ export default function BottomPanel({
               ))}
             </div>
             <canvas ref={canvas} className="lane-canvas" />
+            {view && (
+              <div className="minimap" title="Where you are in the episode">
+                <span style={{
+                  left: `${(viewStart / Math.max(total, 1)) * 100}%`,
+                  width: `${Math.max((span / Math.max(total, 1)) * 100, 1)}%`,
+                }} />
+              </div>
+            )}
             <div className="playhead" ref={playhead} style={{ left: 0 }} />
           </div>
         </div>

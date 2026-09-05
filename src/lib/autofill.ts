@@ -65,17 +65,37 @@ export async function autofillVault(
   for (const [key, group] of groups) {
     let asset = byKey.get(key)
 
-    // New, and worth keeping: it repeats in this episode.
-    if (!asset && group.elements.length >= 2) {
+    /*
+     * A spot effect earns its place in the vault by repeating. Music and ambience do not
+     * have to: a bed or a room is reusable by nature, and a theme that plays once in this
+     * episode plays once in every episode. Requiring a repeat left them stranded inside a
+     * single script, which is exactly where series audio should never live.
+     */
+    const alwaysVault = group.elements.some(e => e.kind === 'music' || e.kind === 'ambience')
+
+    if (!asset && (alwaysVault || group.elements.length >= 2)) {
+      const first = group.elements[0]
+      const kind = first.kind === 'music' ? 'bed' : first.kind === 'ambience' ? 'ambience' : 'sfx'
+
       const { data } = await supabase.from('series_assets').insert({
         project_id: projectId,
-        name: group.label.replace(/[.!?]+$/, '').slice(0, 48),
-        kind: 'sfx',
+        // "MÚSICA · Cama de juego" is a label plus a name. Only the name belongs here.
+        // "MÚSICA · Cama de juego. Entra aquí y sale cuando..." is a label, a name and a
+        // note to the editor. Only the name goes on the card.
+        name: group.label
+          .replace(/^(m[úu]sica|ambiente|sonido|efecto)\s*[·:-]\s*/i, '')
+          .split(/\.\s/)[0]
+          .replace(/[.!?]+$/, '')
+          .trim()
+          .slice(0, 48),
+        kind,
         auto_place: 'none',
         auto: true,
         match_key: key,
-        description: buildSoundPrompt(group.label).prompt,
-        expected_ms: expectedMsFrom(group.label) ?? defaultLengthMs('sfx'),
+        description: kind === 'sfx'
+          ? buildSoundPrompt(group.label).prompt
+          : 'From the script. Music and ambiences are uploaded, not generated.',
+        expected_ms: expectedMsFrom(group.label) ?? defaultLengthMs(kind),
         sort: sort++,
       }).select().single()
       if (data) { asset = data as SeriesAsset; byKey.set(key, asset); created++ }

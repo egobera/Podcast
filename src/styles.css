@@ -1401,3 +1401,43 @@ select.inline:hover { border-color: var(--text-3); }
   padding: 3px 5px; font-size: 10px; font-variant-numeric: tabular-nums;
 }
 .clip-fade input:focus { outline: none; border-color: #5ea3dd; }
+
+/* ================= panel: resize, zoom, minimap ================= */
+
+.panel-grip {
+  position: absolute; top: 0; left: 0; right: 0; height: 7px;
+  cursor: ns-resize; z-index: 2;
+}
+.panel-grip::after {
+  content: ''; position: absolute; top: 3px; left: 50%; transform: translateX(-50%);
+  width: 44px; height: 3px; border-radius: 99px;
+  background: var(--ink-line);
+  transition: background .12s var(--ease), width .12s var(--ease);
+}
+.panel-grip:hover::after { background: #5ea3dd; width: 64px; }
+
+.panel { position: sticky; }
+
+.zoom-tools {
+  display: flex; align-items: center; gap: 2px;
+  margin-left: 14px; padding-left: 14px;
+  border-left: 1px solid var(--ink-line);
+}
+.zoom-read {
+  font-family: var(--mono); font-size: 10px; color: #8c9cae;
+  min-width: 38px; text-align: center;
+}
+.zoom-tools .tp-btn { width: 24px; height: 24px; font-size: 12px; }
+.zoom-tools .tp-btn:last-child { width: auto; padding: 0 8px; font-size: 10px; }
+
+/* Where the window sits inside the whole episode. */
+.minimap {
+  position: relative; height: 3px; margin-top: 6px;
+  background: var(--ink-1); border-radius: 99px; overflow: hidden;
+}
+.minimap span {
+  position: absolute; top: 0; bottom: 0;
+  background: #3f86c4; border-radius: 99px; opacity: .8;
+}
+
+.lane-area { cursor: crosshair; }
