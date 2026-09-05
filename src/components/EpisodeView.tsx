@@ -12,7 +12,7 @@ import Inspector from './Inspector'
 import Suggestions from './Suggestions'
 import BottomPanel from './BottomPanel'
 import TrimEditor from './TrimEditor'
-import { Confirm, ConfirmTyped, Keys, useToast } from './ui'
+import { Confirm, ConfirmTyped, Modal, Keys, useToast } from './ui'
 import { deleteEpisode } from '../lib/deletion'
 import { loadUsage } from '../lib/usageQuery'
 import { autofillVault, seedVault } from '../lib/autofill'
@@ -57,6 +57,7 @@ export default function EpisodeView({
   const [askGenerate, setAskGenerate] = useState<number | null>(null)
   const [exporting, setExporting] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [redoing, setRedoing] = useState<'ask' | null>(null)
   const [run, setRun] = useState<{ done: number; failed: number; total: number; error: string } | null>(null)
   const cancelRun = useRef(false)
   const [trimming, setTrimming] = useState<{ path: string; title: string } | null>(null)
@@ -417,6 +418,84 @@ export default function EpisodeView({
    * judgement: the judgement is which takes to redo, and that is easier to make once the
    * whole thing plays.
    */
+  /**
+   * Every clip takes the length of its own file.
+   *
+   * Doing this one at a time is fine for a stray sound and hopeless for an episode where
+   * a hundred lines each sit a fraction wrong. The overlap people hear is the sum of a
+   * hundred small disagreements between a stored number and an audio file.
+   */
+  /**
+   * Throw away the takes and make them again.
+   *
+   * The reason to do this is almost never "all of them": it is that one character just
+   * changed model, or voice, or speed, and their lines are now the odd ones out. So the
+   * scope is a character, and everybody is only the sum of all of them.
+   *
+   * Nothing is deleted. The old takes stay in their element's history, so a regeneration
+   * that turns out worse can be walked back by picking the previous take.
+   */
+  async function redoDialogue(characterId: string | null) {
+    const lines = elements.filter(e =>
+      e.kind === 'dialogue'
+      && e.status !== 'missing'
+      && (characterId === null || e.character_id === characterId))
+
+    if (lines.length === 0) { toast('No lines to redo.'); return }
+
+    const who = characterId ? chars.find(c => c.id === characterId)?.name : null
+    setRedoing(null)
+
+    await supabase.from('elements').update({
+      status: 'stale',
+      approved_take_id: null,
+      lead_silence_ms: 0,
+      tail_silence_ms: 0,
+    }).in('id', lines.map(l => l.id))
+
+    await load()
+    toast(`${lines.length} ${who ? `${who} lines` : 'lines'} marked for a new take. Generate first pass makes them.`)
+  }
+
+  async function fitAll() {
+    setBusyId('fit')
+    try {
+      const clips = await buildClips()
+      if (clips.length === 0) { toast('Nothing to measure yet.'); return }
+
+      const ctx = new AudioContext()
+      let fixed = 0
+
+      for (const clip of clips) {
+        const el = elements.find(e => e.id === clip.id)
+        if (!el || el.kind === 'pause') continue
+        if ((el.offset_ms ?? 0) !== 0 || el.fade_in_ms !== null || el.fade_out_ms !== null) continue
+
+        try {
+          const buf = await ctx.decodeAudioData(await (await fetch(clip.url)).arrayBuffer())
+          const real = Math.round(buf.duration * 1000)
+          if (Math.abs(el.duration_ms - real) <= 120) continue
+
+          const edges = findEdges(buf)
+          await supabase.from('elements').update({
+            duration_ms: real,
+            lead_silence_ms: Math.round(edges.lead * 1000),
+            tail_silence_ms: Math.round(edges.tail * 1000),
+          }).eq('id', el.id)
+          fixed++
+        } catch { /* one unreadable file should not stop the rest */ }
+      }
+
+      await ctx.close()
+      await load()
+      toast(fixed > 0
+        ? `${fixed} clips now match their audio. Nothing you moved or faded was touched.`
+        : 'Everything already matches its audio.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function approveAll() {
     const waiting = elements.filter(e => e.status === 'generated')
     if (waiting.length === 0) { toast('Nothing waiting for approval.'); return }
@@ -663,6 +742,12 @@ export default function EpisodeView({
     todo: allRows.filter(e => e.status === 'missing' || e.status === 'stale').length,
     review: allRows.filter(e => e.status === 'generated').length,
     done: allRows.filter(e => e.status === 'approved').length,
+    // Has audio, nobody has shaped it by hand, and its length was never measured.
+    mismatched: allRows.filter(e =>
+      e.kind !== 'pause'
+      && (e.status === 'approved' || e.status === 'generated' || e.series_asset_id)
+      && (e.offset_ms ?? 0) === 0 && e.fade_in_ms === null && e.fade_out_ms === null
+      && !e.lead_silence_ms && !e.tail_silence_ms).length,
   }
   const visible = allRows.filter(e =>
     filter === 'all' ? true
@@ -866,6 +951,20 @@ export default function EpisodeView({
             Generate first pass
           </button>
         )}
+        {counts.done + counts.review > 0 && (
+          <button className="btn" onClick={() => setRedoing('ask')}
+            title="Mark dialogue for a new take">
+            Redo voices
+          </button>
+        )}
+
+        {counts.mismatched > 0 && (
+          <button className="btn" disabled={busyId === 'fit'} onClick={fitAll}
+            title="Give every clip the length of its own audio">
+            {busyId === 'fit' ? 'Measuring' : `Fix ${counts.mismatched} lengths`}
+          </button>
+        )}
+
         {counts.review > 0 && (
           <button className="btn" disabled={busyId === 'bulk'} onClick={approveAll}
             title="Lock every take that is waiting, and pin the timings to the audio">
@@ -1293,6 +1392,43 @@ export default function EpisodeView({
         />
       )}
 
+      {redoing && (
+        <Modal
+          title="Redo the dialogue"
+          onClose={() => setRedoing(null)}
+          footer={<button className="btn" data-variant="quiet" onClick={() => setRedoing(null)}>Cancel</button>}
+        >
+          <p>
+            The takes are kept. Their lines go back to needing one, and the next first pass
+            makes them again with whatever the character sounds like now.
+          </p>
+
+          <div className="redo-list">
+            {chars
+              .filter(c => elements.some(e => e.kind === 'dialogue' && e.character_id === c.id))
+              .map(c => {
+                const n = elements.filter(e =>
+                  e.kind === 'dialogue' && e.character_id === c.id && e.status !== 'missing').length
+                return (
+                  <button className="btn" key={c.id} disabled={n === 0}
+                    onClick={() => redoDialogue(c.id)}>
+                    {c.name} · {n}
+                  </button>
+                )
+              })}
+          </div>
+
+          <button className="btn danger-quiet" onClick={() => redoDialogue(null)}>
+            Everyone · {elements.filter(e => e.kind === 'dialogue' && e.status !== 'missing').length}
+          </button>
+
+          <p className="notice">
+            One character at a time is usually what you want. Redoing everybody costs the whole
+            episode again, and the lines that already sound right are the ones you would lose.
+          </p>
+        </Modal>
+      )}
+
       {deleting && (
         <ConfirmTyped
           title={`Delete ${episode.title}`}
@@ -1336,6 +1472,43 @@ export default function EpisodeView({
           }}
           onClose={() => setTrimming(null)}
         />
+      )}
+
+      {redoing && (
+        <Modal
+          title="Redo the dialogue"
+          onClose={() => setRedoing(null)}
+          footer={<button className="btn" data-variant="quiet" onClick={() => setRedoing(null)}>Cancel</button>}
+        >
+          <p>
+            The takes are kept. Their lines go back to needing one, and the next first pass
+            makes them again with whatever the character sounds like now.
+          </p>
+
+          <div className="redo-list">
+            {chars
+              .filter(c => elements.some(e => e.kind === 'dialogue' && e.character_id === c.id))
+              .map(c => {
+                const n = elements.filter(e =>
+                  e.kind === 'dialogue' && e.character_id === c.id && e.status !== 'missing').length
+                return (
+                  <button className="btn" key={c.id} disabled={n === 0}
+                    onClick={() => redoDialogue(c.id)}>
+                    {c.name} · {n}
+                  </button>
+                )
+              })}
+          </div>
+
+          <button className="btn danger-quiet" onClick={() => redoDialogue(null)}>
+            Everyone · {elements.filter(e => e.kind === 'dialogue' && e.status !== 'missing').length}
+          </button>
+
+          <p className="notice">
+            One character at a time is usually what you want. Redoing everybody costs the whole
+            episode again, and the lines that already sound right are the ones you would lose.
+          </p>
+        </Modal>
       )}
 
       {deleting && (
@@ -1442,8 +1615,18 @@ export default function EpisodeView({
            */
           const pending = measured.filter(m => {
             const el = elements.find(e => e.id === m.id)
-            if (!el || el.kind === 'pause' || el.series_asset_id) return false
-            if (el.lead_silence_ms || el.tail_silence_ms) return false
+            if (!el || el.kind === 'pause') return false
+
+            /*
+             * Anything somebody has placed or shaped by hand is left alone: a move, a
+             * fade, or a trim is a decision, and listening should never quietly undo one.
+             * Everything else follows the audio, because a length that disagrees with its
+             * file is what makes two lines talk over each other.
+             */
+            const touched = (el.offset_ms ?? 0) !== 0
+              || el.fade_in_ms !== null || el.fade_out_ms !== null
+            if (touched) return false
+
             return Math.abs(el.duration_ms - m.durationMs) > 120
           })
           if (pending.length === 0) return

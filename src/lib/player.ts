@@ -285,7 +285,20 @@ export class EpisodePlayer {
 
       const when = t0 + Math.max(clipStart - fromS, 0)
       const into = Math.max(fromS - clipStart, 0) + (clip.leadMs ?? 0) / 1000
-      const playFor = Math.max(buffer.duration - into, 0)
+
+      /*
+       * A bed stops when its slot ends.
+       *
+       * The whole file used to be scheduled regardless, so a two minute theme dropped into
+       * a fifteen second opening carried on underneath the first scene. Speech is left
+       * alone: cutting a line at an arbitrary point would clip a word, and the fix for a
+       * line that runs long is to correct its length, not to truncate it mid sentence.
+       */
+      const bounded = clip.role === 'bed' || clip.role === 'ambience' || clip.role === 'theme'
+      const slot = clip.durationMs / 1000
+      const playFor = bounded && slot > 0.2
+        ? Math.min(Math.max(buffer.duration - into, 0), slot)
+        : Math.max(buffer.duration - into, 0)
 
       // Fade both edges so nothing clicks, and give music long enough fades to arrive.
       const fadeIn = clip.fadeInMs !== undefined ? clip.fadeInMs / 1000 : isMusic ? BED_FADE : FADE_IN
@@ -301,6 +314,8 @@ export class EpisodePlayer {
       src.start(when, into)
       if (clip.loop && clip.loopUntilMs) {
         src.stop(t0 + Math.max(clip.loopUntilMs / 1000 - fromS, 0))
+      } else if (bounded && slot > 0.2 && playFor < buffer.duration - into) {
+        src.stop(when + playFor)
       }
       this.sources.push(src)
     }

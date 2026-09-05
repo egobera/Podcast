@@ -1614,3 +1614,6 @@ select.inline:hover { border-color: var(--text-3); }
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: none; }
 }
+
+.redo-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.redo-list .btn { flex: 1 1 auto; min-width: 130px; justify-content: center; }
