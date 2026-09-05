@@ -19,7 +19,11 @@ import { autofillVault, seedVault } from '../lib/autofill'
 import ExportPanel from './ExportPanel'
 import { Play as PlayIcon, Pause as PauseIcon, Check as CheckIcon } from './icons'
 import { usePreview } from '../lib/usePreview'
-import { findEdges } from '../lib/player'
+import { usePhone } from '../lib/useMedia'
+import { announce, reportPosition, clearSession } from '../lib/mediaSession'
+import { tap } from '../lib/pwa'
+import MobileEpisode from './MobileEpisode'
+import { EpisodePlayer, findEdges } from '../lib/player'
 import type { Clip } from '../lib/player'
 import type { AudioElement, Character, Comment, Episode, Job, Project, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
@@ -61,6 +65,10 @@ export default function EpisodeView({
   const [filter, setFilter] = useState<'all' | 'todo' | 'review' | 'done'>('all')
   const toast = useToast()
   const preview = usePreview()
+  const phone = usePhone()
+  const [phonePlaying, setPhonePlaying] = useState(false)
+  const phonePlayer = useRef<EpisodePlayer | null>(null)
+  const [phonePos, setPhonePos] = useState(0)
   const history = useHistory(() => load())
   const uploadInput = useRef<HTMLInputElement | null>(null)
   const uploadTarget = useRef<string | null>(null)
@@ -750,6 +758,67 @@ export default function EpisodeView({
   }
 
   let lastScene = ''
+
+  if (phone) {
+    return (
+      <MobileEpisode
+        episode={episode}
+        elements={positioned}
+        characters={chars}
+        comments={comments}
+        busyId={busyId}
+        total={total}
+        position={phonePos}
+        playingAll={phonePlaying}
+        onPlayElement={play}
+        onGenerate={el => generateOne(el, 1)}
+        onApprove={async el => {
+          const { data } = await supabase.from('takes').select('*')
+            .eq('element_id', el.id).order('created_at', { ascending: false }).limit(1)
+          const take = (data ?? [])[0] as Take | undefined
+          if (take) await approve(el, take)
+        }}
+        onPlayAll={async () => {
+          tap()
+          if (phonePlaying) {
+            phonePlayer.current?.pause()
+            setPhonePlaying(false)
+            reportPosition(phonePos, total, false)
+            return
+          }
+          preview.stop()
+          if (!phonePlayer.current) {
+            phonePlayer.current = new EpisodePlayer(project.music_duck_db)
+            const clips = await buildClips()
+            if (clips.length === 0) return
+            await phonePlayer.current.prepare(clips)
+          }
+          phonePlayer.current.play(phonePos)
+          setPhonePlaying(true)
+          /*
+           * The lock screen. An episode is seven minutes and people listen while doing
+           * something else, so the screen goes off and the audio has to stay reachable.
+           */
+          announce({
+            title: episode.title,
+            series: project.name,
+            onPlay: () => { phonePlayer.current?.play(phonePos); setPhonePlaying(true) },
+            onPause: () => { phonePlayer.current?.pause(); setPhonePlaying(false) },
+            onSeek: to => { phonePlayer.current?.seek(to); setPhonePos(to) },
+          })
+
+          const tick = () => {
+            const at = phonePlayer.current?.currentMs ?? 0
+            setPhonePos(at)
+            reportPosition(at, total, !!phonePlayer.current?.playing)
+            if (at < total && phonePlayer.current?.playing) requestAnimationFrame(tick)
+            else { setPhonePlaying(false); reportPosition(at, total, false) }
+          }
+          requestAnimationFrame(tick)
+        }}
+      />
+    )
+  }
 
   return (
     <>

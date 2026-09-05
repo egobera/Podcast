@@ -11,6 +11,15 @@ import '@fontsource/ibm-plex-mono/400.css'
 import '@fontsource/ibm-plex-mono/500.css'
 import './styles.css'
 
+// The shell is cached so the app opens instantly and survives a lost connection.
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      // Nothing to do: without it the app still works, it just starts slower.
+    })
+  })
+}
+
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />

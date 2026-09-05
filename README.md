@@ -498,6 +498,49 @@ se generan en la misma pasada.
 sin audio, sonidos de bóveda vacíos, sintonías sin colocar y líneas colocadas todavía por conteo de
 palabras. Cada una dice qué hacer.
 
+## En el teléfono
+
+Instalada desde el navegador, se comporta como una app y no como una página. Cinco cosas la
+separan de una web en el móvil:
+
+**Abre al instante y sin conexión.** Un service worker guarda el armazón en el dispositivo. El
+destello blanco y la ruleta al abrir son la señal más clara de que algo es una web. El audio y los
+datos siempre van a la red: audio caducado sería peor que ninguno.
+
+**Sale en la pantalla de bloqueo.** Mientras suena un episodio, aparecen el título, la carátula y
+los controles, y los botones de los auriculares funcionan. Un episodio dura siete minutos y se
+escucha haciendo otra cosa, así que la pantalla se apaga: sin esto el audio deja de ser accesible.
+
+**Pestañas abajo en vez de barra lateral.** Una barra lateral es una idea de escritorio; da por
+hecho un puntero y una pantalla ancha. En un teléfono la navegación va abajo, al alcance del
+pulgar, y con avisos de lo que espera en cada sección.
+
+**Vibra al decidir.** Un toque corto al quedarse una toma. Es lo que hace que una decisión se
+sienta tomada.
+
+**Se comporta al tocarla.** Sin destello gris al pulsar, sin selección accidental al arrastrar, sin
+rebote del documento, sin zoom por doble toque, y respetando las zonas seguras del teléfono.
+
+**Instalar:** en Android aparece un aviso discreto cuando ya hay algo por lo que volver. En iPhone
+no existe forma de pedirlo desde la página, así que el aviso dice dónde está el botón: compartir,
+Añadir a pantalla de inicio.
+
+## En el teléfono, modo revisión
+
+Por debajo de 760 píxeles, el episodio se abre en modo revisión en lugar del editor encogido.
+Colocar, recortar y mezclar necesitan un puntero, así que se quedan en el ordenador. Lo que un
+teléfono hace bien es lo que se hace en el sofá: escuchar lo que salió y decidir.
+
+La pantalla arranca en **Waiting**, no en todo, porque el motivo de abrirla en el móvil es que hay
+algo esperando. Tocas una línea y se abre con tres botones grandes: escuchar, quedársela, o pedir
+otra toma.
+
+**Quedársela aprueba y salta a la siguiente que espera.** Ese es el bucle entero, y se recorre con
+el pulgar.
+
+Abajo hay un reproductor del episodio completo. Todos los objetivos táctiles miden 44 píxeles como
+mínimo, y el pie respeta el área segura del teléfono.
+
 ## Escuchar
 
 Se escucha **antes** de aprobar, no después. La reproducción usa la toma aprobada si la hay y la más

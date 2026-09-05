@@ -9,6 +9,9 @@ import Library from './components/Library'
 import TeamView from './components/TeamView'
 import { AskText, ToastHost, useToast } from './components/ui'
 import ErrorBoundary, { SetupNeeded } from './components/ErrorBoundary'
+import MobileTabs, { InstallPrompt, type Tab } from './components/MobileTabs'
+import { usePhone } from './lib/useMedia'
+import { isStandalone } from './lib/pwa'
 import type { Character, Episode, Project, SeriesAsset, Team, TeamMember } from './lib/types'
 
 type View = { kind: 'library' } | { kind: 'team' } | { kind: 'vault' } | { kind: 'characters' } | { kind: 'episode'; id: string }
@@ -39,6 +42,7 @@ function Workspace() {
   const [chars, setChars] = useState<Character[]>([])
   const [view, setView] = useState<View>({ kind: 'library' })
   const [ask, setAsk] = useState<Ask>(null)
+  const phone = usePhone()
   const [setupError, setSetupError] = useState('')
   const toast = useToast()
 
@@ -189,8 +193,14 @@ function Workspace() {
     setView({ kind: 'episode', id: eid })
   }
 
+  const tab: Tab =
+    view.kind === 'vault' ? 'vault'
+      : view.kind === 'characters' ? 'cast'
+        : view.kind === 'team' ? 'team'
+          : 'episodes'
+
   return (
-    <div className="shell">
+    <div className="shell" data-phone={phone} data-standalone={isStandalone()}>
       <nav className="rail">
         <div className="rail-brand">
           <h1>{project ? project.name : team?.name ?? 'Estudio'}</h1>
