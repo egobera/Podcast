@@ -923,7 +923,8 @@ export default function EpisodeView({
                 <span className="row-who">
                   {char?.name ?? (isTemplate ? 'theme' : isBlock ? 'block'
                     : el.kind === 'pause' ? 'pause'
-                      : el.kind === 'music' ? 'music' : 'sound')}
+                      : el.kind === 'music' ? 'music'
+                        : el.kind === 'ambience' ? 'ambience' : 'sound')}
                 </span>
                 <span className="row-text">
                   {el.text_content}
@@ -1090,9 +1091,24 @@ export default function EpisodeView({
               hint: 'They play as silence until they have audio. The first pass now fills them too.',
             },
             {
-              label: missingThemes.length === 0 ? 'Themes are in place' : 'Themes are missing',
+              label: missingThemes.length === 0
+                ? 'Themes are in place'
+                : `${missingThemes.length} themes are not in this episode`,
               done: missingThemes.length === 0,
-              hint: 'Place them from the button above.',
+              hint: 'Place them from the button above. An episode only picks them up when it is created.',
+            },
+            {
+              label: (() => {
+                const themes = assets.filter(a => a.auto_place === 'open' || a.auto_place === 'close')
+                const empty = themes.filter(a => !a.storage_path)
+                if (themes.length === 0) return 'No themes in the vault yet'
+                return empty.length === 0
+                  ? 'Themes have their audio'
+                  : `${empty.length} themes are still empty`
+              })(),
+              done: assets.some(a => a.auto_place === 'open' || a.auto_place === 'close')
+                && assets.filter(a => (a.auto_place === 'open' || a.auto_place === 'close') && !a.storage_path).length === 0,
+              hint: 'Upload them in the vault. Music comes from outside; it is not generated.',
             },
             {
               label: guessed.length === 0

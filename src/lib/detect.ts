@@ -64,13 +64,17 @@ const TIMING_WORDS = new Set([
 ])
 
 export function isTimingOnly(text: string): boolean {
-  const words = normalize(text).split(' ').filter(Boolean)
+  // Digits are part of "Silencio. 1 segundo", not a sound anybody has to make.
+  const words = normalize(text).split(' ').filter(w => w && !/^\d+$/.test(w))
   return words.length > 0 && words.every(w => TIMING_WORDS.has(w))
 }
 
 function cuesOf(elements: CueLike[]): CueLike[] {
   return elements
     .filter(e => e.kind !== 'dialogue'
+      // A pause arrives already classified. Judging it by its words again was how
+      // "Silencio. 1 segundo" ended up proposed as a sound to generate seven times.
+      && e.kind !== 'pause'
       && e.text_content.trim().length > 2
       && !isTimingOnly(e.text_content))
     .sort((a, b) => a.idx - b.idx)

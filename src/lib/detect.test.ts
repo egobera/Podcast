@@ -31,6 +31,13 @@ describe('isTimingOnly', () => {
     expect(isTimingOnly('Pausa de dos segundos')).toBe(true)
   })
 
+  it('reads a stated length as timing, not as a sound', () => {
+    // The digit used to break the check, so these were proposed as vault sounds.
+    expect(isTimingOnly('Silencio. 1 segundo.')).toBe(true)
+    expect(isTimingOnly('Silencio. 2 segundos.')).toBe(true)
+    expect(isTimingOnly('Pausa. 3 segundos.')).toBe(true)
+  })
+
   it('keeps cues that only contain a timing word in passing', () => {
     // The freeze opens with this. Filtering it would break block detection.
     expect(isTimingOnly('CHASQUIDO. SILENCIO TOTAL.')).toBe(false)
@@ -46,6 +53,17 @@ describe('detectRepeats', () => {
     ], { minCount: 3 })
     expect(found).toHaveLength(1)
     expect(found[0].count).toBe(3)
+  })
+
+  it('never proposes something already classified as a pause', () => {
+    const pause = (id: string, idx: number, text: string) =>
+      ({ id, idx, kind: 'pause', text_content: text, episode_id: 'ep1' })
+    const found = detectRepeats([
+      pause('1', 0, 'Silencio. 1 segundo.'),
+      pause('2', 10, 'Silencio. 1 segundo.'),
+      pause('3', 20, 'Silencio. 1 segundo.'),
+    ], { minCount: 2 })
+    expect(found).toHaveLength(0)
   })
 
   it('never proposes timing directions', () => {

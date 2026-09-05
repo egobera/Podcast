@@ -17,7 +17,9 @@ export async function missingTemplateAssets(episodeId: string, projectId: string
     supabase.from('elements').select('series_asset_id').eq('episode_id', episodeId),
   ])
   const already = new Set((present ?? []).map(e => e.series_asset_id).filter(Boolean))
-  return (assets ?? []).filter(a => a.storage_path && !already.has(a.id))
+  // Missing from the episode means not placed, not missing its audio. Those are different
+  // problems and the readiness list reports them separately.
+  return (assets ?? []).filter(a => !already.has(a.id))
 }
 
 export async function applyTemplate(episodeId: string, projectId: string) {
@@ -27,7 +29,15 @@ export async function applyTemplate(episodeId: string, projectId: string) {
     .eq('project_id', projectId)
     .in('auto_place', ['open', 'close'])
 
-  const placeable = (assets ?? []).filter(a => a.storage_path) as SeriesAsset[]
+  /*
+   * A theme is placed whether or not it has audio yet.
+   *
+   * Requiring the file first meant an episode created before the vault was filled came out
+   * with no theme at all, and the notice that would have said so used the same filter, so
+   * nothing was placed and nothing was reported. An empty slot in the right place is
+   * useful; a silent absence is not.
+   */
+  const placeable = (assets ?? []) as SeriesAsset[]
   if (placeable.length === 0) return 0
 
   const rows = placeable.map(a => ({
@@ -40,8 +50,9 @@ export async function applyTemplate(episodeId: string, projectId: string) {
     origin: 'template' as const,
     anchor: 'line' as const,
     gain_role: 'theme' as const,
-    duration_ms: a.duration_ms ?? 15000,
-    status: 'approved' as const,
+    duration_ms: a.duration_ms ?? (a.auto_place === 'open' ? 15000 : 30000),
+    // With audio it is done; without, it shows up as something still to make.
+    status: (a.storage_path ? 'approved' : 'missing') as 'approved' | 'missing',
   }))
 
   await supabase.from('elements').insert(rows)

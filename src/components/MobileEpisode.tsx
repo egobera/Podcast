@@ -120,7 +120,8 @@ export default function MobileEpisode({
               <div className="phone-line-top">
                 <span className="phone-who">
                   {who?.name ?? (el.kind === 'pause' ? 'silence'
-                    : el.kind === 'music' ? 'music' : 'sound')}
+                    : el.kind === 'music' ? 'music'
+                      : el.kind === 'ambience' ? 'ambience' : 'sound')}
                 </span>
                 <span className="phone-meta">
                   {notes > 0 && <span className="note-count tnum">{notes}</span>}
