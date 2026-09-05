@@ -64,7 +64,10 @@ Cuando esté listo:
 20. Otra con `supabase/migration-014-clear-raw-prompts.sql`
 21. Otra con `supabase/migration-015-clean-pause-assets.sql`
 22. Otra con `supabase/migration-016-voice-prompt.sql`
-23. Y la última, `supabase/migration-017-restore-descriptions.sql`
+23. Otra con `supabase/migration-017-restore-descriptions.sql`
+24. Otra con `supabase/migration-018-pacing.sql`
+25. Otra con `supabase/migration-019-voice-quality.sql`
+26. Y la última, `supabase/migration-020-fades.sql`
 
 El primero crea las tablas, las reglas de seguridad y el almacén de audio. El segundo añade la
 plantilla de episodio, el bloque de congelamiento y los objetivos de duración de 8 minutos. El
@@ -337,6 +340,35 @@ mueve si lo cambias.
 *(Silencio. 3 segundos.)*
 ```
 
+## Las líneas vecinas
+
+Cada línea se generaba desde cero, sin saber qué venía antes ni después, y por eso todas aterrizaban
+en el mismo sitio neutro. Es la razón principal de que un episodio sonara a grabaciones puestas en
+fila.
+
+Ahora se le pasan al modelo la línea anterior y la siguiente. Con eso una pregunta conserva su
+subida y la respuesta empieza donde la pregunta la dejó. Se desactiva desde la bóveda si alguna vez
+estorba.
+
+## Ajustes de voz por personaje
+
+**Velocidad.** Un niño de ocho años no habla al ritmo de una narradora. Por debajo de 0,9 empieza a
+arrastrar; por encima de 1,1 empieza a atropellar.
+
+**Semilla.** Fijada, una regeneración es comparable a la anterior en vez de una tirada nueva. Déjala
+vacía mientras buscas la interpretación y fíjala cuando la encuentres.
+
+**Modelo.** v3 lee las etiquetas de emoción. multilingual v2 es más estable pero las ignora. turbo
+es el más rápido y el menos expresivo.
+
+## Literalidad de los sonidos
+
+Un control en la bóveda decide cuánto sigue el generador las palabras. Bajo, interpreta y da algo
+atmosférico. Alto, obedece y da el timbre que pediste. Alrededor de 0,4 va bien para ambientes y
+0,7 para golpes puntuales.
+
+Los ambientes se generan además en modo bucle, así que empalman sin costura.
+
 ## Cómo se dice cada línea
 
 Un guion no dirige cada frase: dirige las que se salen de la norma. En el episodio 1, 37 líneas de
@@ -381,6 +413,90 @@ con la cadena literal que se manda: las etiquetas de audio delante, las pausas d
 texto. Y dice si el tono vino de la línea o del personaje.
 
 Sin eso, ajustar una interpretación es a ciegas.
+
+## Ritmo
+
+Un episodio sonaba a grabaciones puestas en fila porque eso era exactamente lo que se montaba: cada
+línea pegada a la anterior, sin un milisegundo de aire. Ahora el aire depende de lo que acaba de
+pasar.
+
+| Situación | Aire |
+|---|---|
+| El mismo personaje sigue hablando | 140 ms |
+| Otro personaje responde | 300 ms |
+| Después de una pregunta | 420 ms |
+| Después de una línea que se apaga | 520 ms |
+| Cambio de escena | 900 ms |
+| Un efecto puntual | se mete 220 ms por debajo de la línea anterior |
+
+Ese último es el que más cambia: un timbre que espera educadamente a que alguien termine de hablar
+suena a timbre de otra casa.
+
+Todos los valores se ajustan por episodio en el panel derecho, sin línea seleccionada.
+
+## Ambiente de sala
+
+Los huecos entre líneas eran silencio digital, y nada grabado en una habitación real es nunca tan
+silencioso. Ese vacío absoluto entre cada frase es buena parte de lo que hace que un episodio suene
+sintético.
+
+En la bóveda hay una entrada, **Room tone**, marcada para correr por debajo de todo el episodio en
+bucle y muy baja. Con eso, los silencios suenan a habitación en lugar de a archivo.
+
+Vale casi cualquier cosa: una grabación de treinta segundos de tu propio salón con nadie hablando
+sirve mejor que cualquier generación.
+
+## Añadir lo que haga falta
+
+Con una línea seleccionada, el menú **Add after this…** inserta lo que sea: otra línea, un sonido
+que el guion nunca mencionó, un ambiente, una cama musical, un silencio o un corte de escena.
+
+El corte de escena renombra todo lo que viene detrás, así que el motor de ritmo abre un hueco real
+y el guion se lee como dos lugares en vez de uno largo.
+
+## Editar el guion desde el editor
+
+El texto de cualquier línea se edita pulsando sobre él en el panel derecho. Se puede borrar una
+línea o insertar una nueva después.
+
+Cambiar una línea aprobada la marca como pendiente de nueva toma, en lugar de dejar el audio
+antiguo diciendo otra cosa.
+
+## Silencio dentro de los archivos
+
+Cada toma generada llega envuelta en un momento de casi nada por delante y por detrás. Con 115
+líneas son más de treinta segundos de vacío repartidos, y es lo que hace que cada frase suene
+metida en su propia burbuja.
+
+Al aprobar una toma se mide dónde empieza y acaba el sonido de verdad, y a partir de ahí el montaje
+se salta esos bordes. El aire que se oye es el que decides tú, no el que trajo el archivo.
+
+## Cortes de voz
+
+Todo clip entra y sale con un fundido: 12 ms al entrar y 35 al salir. Lo bastante corto para que
+nadie oiga un fundido y lo bastante largo para que nadie oiga un chasquido. La música usa 1,2
+segundos, porque una cama que arranca a nivel pleno se anuncia a sí misma.
+
+## De un guion a algo que se puede oír
+
+Pegas el guion, asignas voces, subes la música, y **Generate first pass**. Después de eso el
+episodio se escucha entero.
+
+Tres cosas que antes quedaban a medias y ahora se resuelven solas:
+
+**Los tiempos se miden del audio.** Hasta que una toma se aprobaba, su duración era una estimación
+por número de palabras, así que un episodio recién generado sonaba con todas las líneas ligeramente
+fuera de sitio. Ahora, la primera vez que le das a reproducir, se mide cada archivo mientras se
+descarga y las posiciones se corrigen. Solo se toca lo que sigue siendo una estimación: nada
+aprobado, recortado a mano o ya medido se altera.
+
+**La tanda incluye los sonidos de bóveda vacíos.** Un elemento que apunta a una entrada sin audio
+llegaba marcado como aprobado y sonaba a silencio, porque la bóveda se supone que ya existe. Ahora
+se generan en la misma pasada.
+
+**Una lista de qué falta.** En el panel derecho, sin línea seleccionada: personajes sin voz, líneas
+sin audio, sonidos de bóveda vacíos, sintonías sin colocar y líneas colocadas todavía por conteo de
+palabras. Cada una dice qué hacer.
 
 ## Escuchar
 
@@ -463,6 +579,49 @@ objetivo, cuánto está aprobado, de qué está hecho el episodio (líneas, soni
 del control de calidad en vivo, sin esperar a exportar.
 
 Por debajo de 1180 píxeles de ancho el panel pasa a colocarse bajo el guion.
+
+## Aprobar en bloque
+
+Después de una primera pasada hay ciento y pico tomas esperando. El botón **Approve** de la barra
+las bloquea todas y fija los tiempos al audio de una vez.
+
+No es una decisión que se tome toma a toma: lo que se juzga es cuáles rehacer, y eso se juzga mejor
+con el episodio entero sonando. Se deshace con `⌘Z` si te arrepientes.
+
+## Tres tomas a la vez
+
+Junto a **Generate** hay un botón **Three**. Una sola toma te obliga a compararla con el recuerdo de
+la anterior, que es mala forma de elegir una interpretación. Tres seguidas la convierten en una
+comparación, y la diferencia entre ellas suele ser mayor que la que consigue retocar el prompt.
+
+Funciona igual para voces y para sonidos.
+
+## Fundidos por clip
+
+Con un clip seleccionado, los campos **in** y **out** de la barra fijan un fundido deliberado en
+milisegundos, y se dibuja sobre el clip como el trozo que se lleva: el clip llega desde nada y se va
+hacia nada.
+
+Son distintos de los fundidos automáticos de 12 y 35 milisegundos, que están para que no chasquee
+nada y no se tocan. Estos son los de un par de segundos, para una cama que entra por debajo de una
+línea o un sonido que se apaga.
+
+En cero, el clip usa el automático.
+
+## Selección múltiple
+
+`Shift` o `⌘` al pulsar un clip lo añade a la selección. Arrastrando cualquiera de ellos se
+mueven todos la misma cantidad, así que una escena entera se desplaza sin perder su forma interna.
+
+El clip principal se marca en blanco y los demás en azul.
+
+## Cortar un clip
+
+Con un clip seleccionado y el cursor dentro, el botón **Split** lo parte en dos.
+
+No corta el archivo: la primera mitad se queda con el audio y gana un margen final, y la segunda es
+un elemento nuevo que apunta al mismo audio con el margen inicial correspondiente. Nada se destruye,
+y en la junta cabe un silencio u otro sonido.
 
 ## Revisar con el teclado
 
@@ -557,13 +716,29 @@ al actor cuánto esperar, no son sonidos. Pero una acotación que solo las conti
 
 ## Recortar el audio
 
+Se abre con **Trim** en cualquier archivo de la bóveda o en la línea seleccionada del panel inferior.
+
+| Acción | Cómo |
+|---|---|
+| Mover el punto de escucha | Arrastrar en cualquier sitio de la onda |
+| Reproducir desde ahí | `espacio` |
+| Poner el principio o el final donde está el cursor | `i` y `o` |
+| Repetir la selección en bucle | `l` |
+| Mover el cursor con precisión | flechas, o flechas con `shift` para saltos grandes |
+| Acercar y alejar | rueda del ratón |
+| Desplazarse | `shift` y rueda |
+
+Los puntos de entrada y salida también se escriben a mano en segundos, con dos decimales. Si el
+guion pide una duración, se compara al lado y se marca en rojo si no cuadra.
+
+Guarda una copia recortada y apunta el asset a ella. El original se queda donde estaba.
+
 La música generada casi nunca sale con la duración que necesitas. Cualquier archivo de la bóveda
 tiene un botón **Trim**: ves la forma de onda, arrastras los dos extremos, escuchas la selección y
 guardas.
 
-Guarda una copia recortada y apunta el asset a ella. El original se queda donde estaba, así que
-siempre puedes volver. La opción de fundir los extremos aplica 25 milisegundos de entrada y salida,
-suficiente para que un bucle no haga clic e imperceptible al oído.
+La opción de fundir los extremos aplica 25 milisegundos, suficiente para que un bucle no haga clic
+e imperceptible al oído.
 
 ## Cómo funcionan la plantilla y el congelamiento
 
@@ -687,6 +862,35 @@ mueve si lo cambias.
 *(Silencio. 3 segundos.)*
 ```
 
+## Las líneas vecinas
+
+Cada línea se generaba desde cero, sin saber qué venía antes ni después, y por eso todas aterrizaban
+en el mismo sitio neutro. Es la razón principal de que un episodio sonara a grabaciones puestas en
+fila.
+
+Ahora se le pasan al modelo la línea anterior y la siguiente. Con eso una pregunta conserva su
+subida y la respuesta empieza donde la pregunta la dejó. Se desactiva desde la bóveda si alguna vez
+estorba.
+
+## Ajustes de voz por personaje
+
+**Velocidad.** Un niño de ocho años no habla al ritmo de una narradora. Por debajo de 0,9 empieza a
+arrastrar; por encima de 1,1 empieza a atropellar.
+
+**Semilla.** Fijada, una regeneración es comparable a la anterior en vez de una tirada nueva. Déjala
+vacía mientras buscas la interpretación y fíjala cuando la encuentres.
+
+**Modelo.** v3 lee las etiquetas de emoción. multilingual v2 es más estable pero las ignora. turbo
+es el más rápido y el menos expresivo.
+
+## Literalidad de los sonidos
+
+Un control en la bóveda decide cuánto sigue el generador las palabras. Bajo, interpreta y da algo
+atmosférico. Alto, obedece y da el timbre que pediste. Alrededor de 0,4 va bien para ambientes y
+0,7 para golpes puntuales.
+
+Los ambientes se generan además en modo bucle, así que empalman sin costura.
+
 ## Cómo se dice cada línea
 
 Un guion no dirige cada frase: dirige las que se salen de la norma. En el episodio 1, 37 líneas de
@@ -731,6 +935,90 @@ con la cadena literal que se manda: las etiquetas de audio delante, las pausas d
 texto. Y dice si el tono vino de la línea o del personaje.
 
 Sin eso, ajustar una interpretación es a ciegas.
+
+## Ritmo
+
+Un episodio sonaba a grabaciones puestas en fila porque eso era exactamente lo que se montaba: cada
+línea pegada a la anterior, sin un milisegundo de aire. Ahora el aire depende de lo que acaba de
+pasar.
+
+| Situación | Aire |
+|---|---|
+| El mismo personaje sigue hablando | 140 ms |
+| Otro personaje responde | 300 ms |
+| Después de una pregunta | 420 ms |
+| Después de una línea que se apaga | 520 ms |
+| Cambio de escena | 900 ms |
+| Un efecto puntual | se mete 220 ms por debajo de la línea anterior |
+
+Ese último es el que más cambia: un timbre que espera educadamente a que alguien termine de hablar
+suena a timbre de otra casa.
+
+Todos los valores se ajustan por episodio en el panel derecho, sin línea seleccionada.
+
+## Ambiente de sala
+
+Los huecos entre líneas eran silencio digital, y nada grabado en una habitación real es nunca tan
+silencioso. Ese vacío absoluto entre cada frase es buena parte de lo que hace que un episodio suene
+sintético.
+
+En la bóveda hay una entrada, **Room tone**, marcada para correr por debajo de todo el episodio en
+bucle y muy baja. Con eso, los silencios suenan a habitación en lugar de a archivo.
+
+Vale casi cualquier cosa: una grabación de treinta segundos de tu propio salón con nadie hablando
+sirve mejor que cualquier generación.
+
+## Añadir lo que haga falta
+
+Con una línea seleccionada, el menú **Add after this…** inserta lo que sea: otra línea, un sonido
+que el guion nunca mencionó, un ambiente, una cama musical, un silencio o un corte de escena.
+
+El corte de escena renombra todo lo que viene detrás, así que el motor de ritmo abre un hueco real
+y el guion se lee como dos lugares en vez de uno largo.
+
+## Editar el guion desde el editor
+
+El texto de cualquier línea se edita pulsando sobre él en el panel derecho. Se puede borrar una
+línea o insertar una nueva después.
+
+Cambiar una línea aprobada la marca como pendiente de nueva toma, en lugar de dejar el audio
+antiguo diciendo otra cosa.
+
+## Silencio dentro de los archivos
+
+Cada toma generada llega envuelta en un momento de casi nada por delante y por detrás. Con 115
+líneas son más de treinta segundos de vacío repartidos, y es lo que hace que cada frase suene
+metida en su propia burbuja.
+
+Al aprobar una toma se mide dónde empieza y acaba el sonido de verdad, y a partir de ahí el montaje
+se salta esos bordes. El aire que se oye es el que decides tú, no el que trajo el archivo.
+
+## Cortes de voz
+
+Todo clip entra y sale con un fundido: 12 ms al entrar y 35 al salir. Lo bastante corto para que
+nadie oiga un fundido y lo bastante largo para que nadie oiga un chasquido. La música usa 1,2
+segundos, porque una cama que arranca a nivel pleno se anuncia a sí misma.
+
+## De un guion a algo que se puede oír
+
+Pegas el guion, asignas voces, subes la música, y **Generate first pass**. Después de eso el
+episodio se escucha entero.
+
+Tres cosas que antes quedaban a medias y ahora se resuelven solas:
+
+**Los tiempos se miden del audio.** Hasta que una toma se aprobaba, su duración era una estimación
+por número de palabras, así que un episodio recién generado sonaba con todas las líneas ligeramente
+fuera de sitio. Ahora, la primera vez que le das a reproducir, se mide cada archivo mientras se
+descarga y las posiciones se corrigen. Solo se toca lo que sigue siendo una estimación: nada
+aprobado, recortado a mano o ya medido se altera.
+
+**La tanda incluye los sonidos de bóveda vacíos.** Un elemento que apunta a una entrada sin audio
+llegaba marcado como aprobado y sonaba a silencio, porque la bóveda se supone que ya existe. Ahora
+se generan en la misma pasada.
+
+**Una lista de qué falta.** En el panel derecho, sin línea seleccionada: personajes sin voz, líneas
+sin audio, sonidos de bóveda vacíos, sintonías sin colocar y líneas colocadas todavía por conteo de
+palabras. Cada una dice qué hacer.
 
 ## Escuchar
 
@@ -814,6 +1102,35 @@ subir el audio, la bóveda compara y avisa si no cuadra, con un acceso directo a
 Es el caso constante con música generada: pides quince segundos de sintonía y Suno devuelve un
 minuto. Tolera hasta un 20% de diferencia antes de decir nada, porque una cama de dos minutos no
 tiene que durar exactamente dos minutos.
+
+## Deshacer
+
+`⌘Z` deshace, `⇧⌘Z` rehace, y hay botones en la barra superior que dicen qué van a deshacer.
+Cubre mover, recortar, niveles, editar una línea, borrarla y añadirla. Guarda los últimos sesenta
+pasos.
+
+Como en cualquier editor, hacer algo nuevo después de deshacer descarta lo que había por delante.
+Conservarlo permitiría que un rehacer posterior pisara trabajo hecho después.
+
+## Mover y recortar en la línea de tiempo
+
+Arrastra un clip por el medio para moverlo, o por uno de sus bordes para recortarlo.
+
+El recorte desde la línea de tiempo **no corta el archivo**: escribe el mismo margen de entrada y
+salida que usa el detector de silencio, así que los bordes se pueden volver a estirar y el original
+sigue intacto.
+
+Al arrastrar, el clip se pega a los bordes de sus vecinos y al cursor de reproducción. Con `shift`
+pulsado se mueve libre, sin imán.
+
+Con un clip seleccionado, las flechas de la barra lo mueven de 100 en 100 milisegundos.
+
+Arrastra un clip en la línea de tiempo para moverlo. Se guarda como desplazamiento respecto a donde
+lo pondría el ritmo automático, así que el motor sigue funcionando alrededor de tu ajuste en lugar
+de quedar anulado.
+
+Con un clip seleccionado, las flechas de la barra lo mueven de 100 en 100 milisegundos, y el número
+del medio dice cuánto se ha desplazado.
 
 ## Mezclar desde el panel inferior
 

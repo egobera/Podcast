@@ -34,6 +34,8 @@ export interface Project {
   language_code: string
   accent: string
   dismissed_patterns: string[]
+  prompt_influence: number
+  context_lines: boolean
   mix_target_lufs: number
   music_duck_db: number
   style_notes: string
@@ -71,6 +73,8 @@ export interface Character {
   stability: number
   similarity: number
   style: number
+  speed: number
+  seed: number | null
   direction_notes: string
   voice_prompt: string
   accent: string | null
@@ -102,6 +106,7 @@ export interface Episode {
   target_min_ms: number
   target_max_ms: number
   lane_gain: Record<string, number>
+  pacing: Record<string, number>
 }
 
 export type Origin = 'script' | 'template' | 'block'
@@ -129,6 +134,11 @@ export interface AudioElement {
   gain_role: GainRole
   gain_db: number
   direction: string
+  offset_ms: number
+  lead_silence_ms: number
+  tail_silence_ms: number
+  fade_in_ms: number | null
+  fade_out_ms: number | null
   status: ElementStatus
   approved_take_id: string | null
 }

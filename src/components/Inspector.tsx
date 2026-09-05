@@ -6,6 +6,7 @@ import { usePreview } from '../lib/usePreview'
 import Comments from './Comments'
 import { applyDirection, effectiveDirection, DIRECTION_HINTS } from '../lib/direction'
 import { buildSoundPrompt } from '../lib/soundprompt'
+import { pacingFor, DEFAULT_PACING, type Pacing } from '../lib/pacing'
 import type { AudioElement, Character, Comment, Episode, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
 interface Props {
@@ -23,7 +24,7 @@ interface Props {
   elements: (AudioElement & { start_ms: number })[]
   total: number
   onPatch: (fields: Partial<AudioElement>) => void
-  onGenerate: () => void
+  onGenerate: (count?: number) => void
   onUpload: () => void
   onApprove: (take: Take) => void
   onPlayTake: (take: Take) => void
@@ -36,6 +37,11 @@ interface Props {
   onDeleteEpisode: () => void
   missingThemes: { id: string; name: string }[]
   onPlaceThemes: () => void
+  readiness: { label: string; done: boolean; hint: string }[]
+  onPacing: (next: Partial<Pacing>) => void
+  onEditText: (text: string) => void
+  onDeleteElement: () => void
+  onInsertAfter: (kind: 'dialogue' | 'sfx' | 'music' | 'ambience' | 'pause' | 'scene') => void
   comments: Comment[]
   userId: string
   userEmail: string | null
@@ -62,7 +68,13 @@ export default function Inspector(p: Props) {
         <span className="dur tnum">{formatMs(el.start_ms)}</span>
       </header>
 
-      <p className="ip-text" data-kind={el.kind}>{el.text_content}</p>
+      <LineText
+        key={el.id}
+        value={el.text_content}
+        kind={el.kind}
+        approved={el.status === 'approved'}
+        onSave={p.onEditText}
+      />
 
       {hasAudio && (
         <button className="btn ip-play" onClick={p.onPlayElement}>
@@ -139,8 +151,13 @@ export default function Inspector(p: Props) {
               />
               <span className="unit">sec</span>
               <button className="btn" data-variant="primary" disabled={p.busy}
-                onClick={() => { p.onStopAudio(); p.onGenerate() }}>
+                onClick={() => { p.onStopAudio(); p.onGenerate(1) }}>
                 {p.busy ? 'Working' : p.takes.length ? 'Another take' : 'Generate'}
+              </button>
+              <button className="btn" disabled={p.busy}
+                onClick={() => { p.onStopAudio(); p.onGenerate(3) }}
+                title="Three at once, to compare">
+                Three
               </button>
             </div>
           </div>
@@ -154,6 +171,28 @@ export default function Inspector(p: Props) {
             <option value="line">Moves with the line before it</option>
             <option value="scene">Stays put under the scene</option>
           </select>
+        </div>
+      )}
+
+      {!isTemplate && !isBlock && (
+        <div className="line-actions">
+          <select className="inline" value=""
+            onChange={e => {
+              if (!e.target.value) return
+              p.onInsertAfter(e.target.value as 'dialogue')
+              e.target.value = ''
+            }}>
+            <option value="">Add after this…</option>
+            <option value="dialogue">A line of dialogue</option>
+            <option value="sfx">A sound</option>
+            <option value="ambience">An ambience</option>
+            <option value="music">Music</option>
+            <option value="pause">A silence</option>
+            <option value="scene">A new scene</option>
+          </select>
+          <button className="btn danger-quiet" onClick={p.onDeleteElement}>
+            Delete this line
+          </button>
         </div>
       )}
 
@@ -209,8 +248,13 @@ export default function Inspector(p: Props) {
           </div>
 
           <div className="btn-row">
-            <button className="btn" data-variant="primary" disabled={p.busy} onClick={p.onGenerate}>
+            <button className="btn" data-variant="primary" disabled={p.busy}
+              onClick={() => p.onGenerate(1)}>
               {p.busy ? 'Generating' : p.takes.length ? 'Another take' : 'Generate'}
+            </button>
+            <button className="btn" disabled={p.busy} onClick={() => p.onGenerate(3)}
+              title="Three at once, to compare instead of remembering">
+              Three
             </button>
             <button className="btn" onClick={p.onUpload}><Upload size={13} /> Upload</button>
           </div>
@@ -241,7 +285,8 @@ export default function Inspector(p: Props) {
 
 /** What the panel shows when nothing is selected: the state of the episode. */
 function EpisodeSummary(p: Props) {
-  const { episode, elements, total, onExport, onDeleteEpisode, missingThemes, onPlaceThemes } = p
+  const { episode, elements, total, onExport, onDeleteEpisode, missingThemes, onPlaceThemes, readiness } = p
+  const pacing = pacingFor(episode)
   const checks = runChecks(elements, episode, total)
   const byKind = {
     dialogue: elements.filter(e => e.kind === 'dialogue').length,
@@ -292,6 +337,52 @@ function EpisodeSummary(p: Props) {
           </button>
         </div>
       )}
+
+      <div className="ip-section">
+        <span className="ip-label">Ready to listen</span>
+        {readiness.map(step => (
+          <div className="step" data-done={step.done} key={step.label}>
+            <span className="step-mark">{step.done ? '●' : '○'}</span>
+            <span className="step-text">
+              {step.label}
+              {!step.done && <span className="hint" style={{ display: 'block' }}>{step.hint}</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <div className="ip-section">
+        <span className="ip-label">Rhythm</span>
+        <p className="notice">
+          How much air sits between things. Two people do not speak with no gap, and the gap
+          after a question is not the gap after a statement.
+        </p>
+        {([
+          ['turn', 'Between speakers'],
+          ['sameSpeaker', 'Same speaker'],
+          ['afterQuestion', 'After a question'],
+          ['afterEllipsis', 'After a line that trails off'],
+          ['sceneChange', 'Between scenes'],
+          ['effectOverlap', 'Effects slide under by'],
+          ['musicLead', 'Music arrives early by'],
+        ] as [keyof Pacing, string][]).map(([key, label]) => (
+          <div className="pace-row" key={key}>
+            <span>{label}</span>
+            <input
+              type="range"
+              min={key === 'effectOverlap' ? -800 : key === 'musicLead' ? -6000 : 0}
+              max={key === 'effectOverlap' || key === 'musicLead' ? 0 : 1500}
+              step={20}
+              value={pacing[key]}
+              onChange={e => p.onPacing({ [key]: Number(e.target.value) } as Partial<Pacing>)}
+            />
+            <span className="tnum">{pacing[key]} ms</span>
+          </div>
+        ))}
+        <button className="btn" data-variant="quiet" onClick={() => p.onPacing(DEFAULT_PACING)}>
+          Back to the defaults
+        </button>
+      </div>
 
       <div className="ip-section">
         <span className="ip-label">Before you export</span>
@@ -394,6 +485,65 @@ function DirectionField({
               ? 'Nothing in there the model understands yet. Try a feeling or a pace.'
               : 'No direction here and none on the character, so this line is read flat.'}
       </span>
+    </div>
+  )
+}
+
+/**
+ * The line, editable in place.
+ *
+ * A script gets rewritten while you listen to it, and having to go back to the whole text,
+ * find the line and re-read the script to change three words is enough friction that
+ * nobody does it. Changing an approved line marks it as needing a new take rather than
+ * quietly leaving the old audio saying something else.
+ */
+function LineText({
+  value, kind, approved, onSave,
+}: {
+  value: string
+  kind: string
+  approved: boolean
+  onSave: (text: string) => void
+}) {
+  const [text, setText] = useState(value)
+  const [editing, setEditing] = useState(false)
+  const changed = text.trim() !== value.trim()
+
+  if (!editing) {
+    return (
+      <p className="ip-text" data-kind={kind} onClick={() => setEditing(true)}
+        title="Click to edit">
+        {value}
+      </p>
+    )
+  }
+
+  return (
+    <div className="field">
+      <textarea
+        autoFocus
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Escape') { setText(value); setEditing(false) }
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { onSave(text); setEditing(false) }
+        }}
+      />
+      <div className="btn-row">
+        <button className="btn" data-variant="primary" disabled={!changed}
+          onClick={() => { onSave(text); setEditing(false) }}>
+          Save
+        </button>
+        <button className="btn" data-variant="quiet"
+          onClick={() => { setText(value); setEditing(false) }}>
+          Cancel
+        </button>
+      </div>
+      {changed && approved && (
+        <span className="hint">
+          The approved take says the old words. Saving marks this line as needing a new one.
+        </span>
+      )}
     </div>
   )
 }

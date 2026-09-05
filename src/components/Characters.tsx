@@ -184,6 +184,37 @@ export default function Characters({ project, onChanged }: { project: Project; o
                     onMouseUp={e => patch(c.id, { similarity: Number((e.target as HTMLInputElement).value) })} />
                 </div>
                 <div className="field">
+                  <label>Speed {c.speed?.toFixed(2) ?? '1.00'}</label>
+                  <input type="range" min={0.7} max={1.2} step={0.01} defaultValue={c.speed ?? 1}
+                    onMouseUp={e => patch(c.id, { speed: Number((e.target as HTMLInputElement).value) })} />
+                  <span className="hint">
+                    An eight year old does not talk at the same rate as a narrator. Below 0.9 starts
+                    to drag; above 1.1 starts to sound hurried.
+                  </span>
+                </div>
+
+                <div className="field">
+                  <label>Seed</label>
+                  <input type="number" placeholder="none" defaultValue={c.seed ?? ''}
+                    onBlur={e => patch(c.id, {
+                      seed: e.target.value ? Number(e.target.value) : null,
+                    })} />
+                  <span className="hint">
+                    Fixed, a regeneration is comparable to the last one instead of a fresh roll.
+                    Leave it empty while you are still looking for the performance.
+                  </span>
+                </div>
+
+                <div className="field">
+                  <label>Model</label>
+                  <select defaultValue={c.model} onChange={e => patch(c.id, { model: e.target.value })}>
+                    <option value="eleven_v3">v3 · reads the emotion tags</option>
+                    <option value="eleven_multilingual_v2">multilingual v2 · steadier, ignores tags</option>
+                    <option value="eleven_turbo_v2_5">turbo v2.5 · fastest, least expressive</option>
+                  </select>
+                </div>
+
+                <div className="field">
                   <label>Accent</label>
                   <select defaultValue={c.accent ?? project.accent}
                     onChange={e => patch(c.id, { accent: e.target.value })}>

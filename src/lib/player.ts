@@ -12,6 +12,55 @@ export interface Clip {
   anchor: 'line' | 'scene'
   /** Per clip trim, in dB, on top of whatever its role gives it. */
   gainDb?: number
+  /** Silence at the head of the file, skipped rather than played. */
+  leadMs?: number
+  /** Loops for as long as the episode lasts. Used for room tone. */
+  loop?: boolean
+  loopUntilMs?: number
+  /** Deliberate fades, in milliseconds. Undefined means the short automatic one. */
+  fadeInMs?: number
+  fadeOutMs?: number
+}
+
+/*
+ * Every clip is faded in and out.
+ *
+ * Butting audio against audio produces a click at the seam, and 150 of those clicks is
+ * what "se escucha el corte de voz" sounds like. Twelve milliseconds is short enough that
+ * nobody hears a fade and long enough that nobody hears a click. Music gets much longer
+ * ones, because a bed that starts at full level announces itself.
+ */
+const FADE_IN = 0.012
+const FADE_OUT = 0.035
+const BED_FADE = 1.2
+
+/**
+ * Where the sound actually starts and stops inside a file.
+ *
+ * Generated speech arrives wrapped in a moment of near silence at each end. Played as is,
+ * every line sits in its own little pocket of nothing and the episode stops feeling like a
+ * conversation. This finds the real edges so they can be skipped.
+ */
+export function findEdges(buffer: AudioBuffer, floorDb = -45): { lead: number; tail: number } {
+  const data = buffer.getChannelData(0)
+  const floor = Math.pow(10, floorDb / 20)
+  const step = Math.max(1, Math.floor(buffer.sampleRate / 1000)) // one millisecond
+
+  let lead = 0
+  for (let i = 0; i < data.length; i += step) {
+    if (Math.abs(data[i]) > floor) { lead = i / buffer.sampleRate; break }
+  }
+
+  let tail = 0
+  for (let i = data.length - 1; i >= 0; i -= step) {
+    if (Math.abs(data[i]) > floor) { tail = (data.length - 1 - i) / buffer.sampleRate; break }
+  }
+
+  // Leave a breath at each edge rather than clipping the first consonant.
+  return {
+    lead: Math.max(lead - 0.03, 0),
+    tail: Math.max(tail - 0.05, 0),
+  }
 }
 
 export function laneOf(role: Exclude<GainRole, 'auto'>): Lane {
@@ -114,7 +163,19 @@ export class EpisodePlayer {
     }
   }
 
-  async prepare(clips: Clip[], onProgress?: (done: number, total: number) => void) {
+  /**
+   * Decodes everything, and reports what it found.
+   *
+   * Until a take is approved its duration is a guess from the word count, so a freshly
+   * generated episode plays with every line in slightly the wrong place. The buffers are
+   * already here; measuring them is free, and it is the difference between a timeline
+   * built on arithmetic and one built on the audio.
+   */
+  async prepare(
+    clips: Clip[],
+    onProgress?: (done: number, total: number) => void,
+    onMeasured?: (measurements: { id: string; durationMs: number; leadMs: number; tailMs: number }[]) => void,
+  ) {
     this.ensureGraph()
     this.clips = clips
     const needed = clips.filter(c => !this.buffers.has(c.url))
@@ -139,6 +200,21 @@ export class EpisodePlayer {
     })
     await Promise.all(workers)
     this.applyLaneGains()
+
+    if (onMeasured) {
+      const measured = clips.flatMap(clip => {
+        const buffer = this.buffers.get(clip.url)
+        if (!buffer) return []
+        const edges = findEdges(buffer)
+        return [{
+          id: clip.id,
+          durationMs: Math.round(buffer.duration * 1000),
+          leadMs: Math.round(edges.lead * 1000),
+          tailMs: Math.round(edges.tail * 1000),
+        }]
+      })
+      onMeasured(measured)
+    }
   }
 
   /** Normalized peak envelope for drawing a waveform, or null if not decoded yet. */
@@ -181,11 +257,13 @@ export class EpisodePlayer {
 
       const src = ctx.createBufferSource()
       src.buffer = buffer
+      if (clip.loop) src.loop = true
 
       const gain = ctx.createGain()
       const offset = clip.gainDb ?? 0
       const base = dbToGain(GAIN_TABLE[clip.role] + offset)
       const ducks = clip.role === 'bed' || clip.role === 'ambience'
+      const isMusic = clip.role === 'bed' || clip.role === 'theme'
 
       if (!ducks) {
         gain.gain.value = base
@@ -204,7 +282,26 @@ export class EpisodePlayer {
       }
 
       src.connect(gain).connect(this.buses.get(laneOf(clip.role))!)
-      src.start(t0 + Math.max(clipStart - fromS, 0), Math.max(fromS - clipStart, 0))
+
+      const when = t0 + Math.max(clipStart - fromS, 0)
+      const into = Math.max(fromS - clipStart, 0) + (clip.leadMs ?? 0) / 1000
+      const playFor = Math.max(buffer.duration - into, 0)
+
+      // Fade both edges so nothing clicks, and give music long enough fades to arrive.
+      const fadeIn = clip.fadeInMs !== undefined ? clip.fadeInMs / 1000 : isMusic ? BED_FADE : FADE_IN
+      const fadeOut = clip.fadeOutMs !== undefined ? clip.fadeOutMs / 1000 : isMusic ? BED_FADE : FADE_OUT
+      const target = gain.gain.value || base
+      gain.gain.setValueAtTime(0.0001, when)
+      gain.gain.exponentialRampToValueAtTime(Math.max(target, 0.0002), when + fadeIn)
+      if (playFor > fadeIn + fadeOut) {
+        gain.gain.setValueAtTime(Math.max(target, 0.0002), when + playFor - fadeOut)
+        gain.gain.exponentialRampToValueAtTime(0.0001, when + playFor)
+      }
+
+      src.start(when, into)
+      if (clip.loop && clip.loopUntilMs) {
+        src.stop(t0 + Math.max(clip.loopUntilMs / 1000 - fromS, 0))
+      }
       this.sources.push(src)
     }
 

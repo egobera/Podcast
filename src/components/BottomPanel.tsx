@@ -35,18 +35,25 @@ function stepFor(totalMs: number, width: number) {
 
 export default function BottomPanel({
   elements, total, duckDb, buildClips, selectedId, onSelect,
-  episode, onLaneGain, onGain, onTrimSelected,
+  episode, onLaneGain, onGain, onNudge, onTrimEdges, onTrimSelected, onSplit, onFade, onMeasured,
+  extraSelected,
 }: {
   elements: (AudioElement & { start_ms: number })[]
   total: number
   duckDb: number
   selectedId: string | null
   buildClips: () => Promise<Clip[]>
-  onSelect: (id: string) => void
+  onSelect: (id: string, additive?: boolean) => void
+  extraSelected?: Set<string>
   episode: Episode
   onLaneGain: (lane: Lane, db: number) => void
   onGain: (elementId: string, db: number) => void
+  onNudge: (elementId: string, offsetMs: number) => void
+  onTrimEdges: (elementId: string, leadMs: number, tailMs: number) => void
+  onMeasured: (m: { id: string; durationMs: number; leadMs: number; tailMs: number }[]) => void
   onTrimSelected: () => void
+  onSplit: (elementId: string, atMs: number) => void
+  onFade: (elementId: string, inMs: number | null, outMs: number | null) => void
 }) {
   const player = useRef<EpisodePlayer | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'playing'>('idle')
@@ -61,6 +68,17 @@ export default function BottomPanel({
   const [width, setWidth] = useState(800)
   const raf = useRef(0)
   const laneArea = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState<string | null>(null)
+  const [dragOffset, setDragOffsetState] = useState<number | null>(null)
+  const lastDelta = useRef<number | null>(null)
+  const [dragEdges, setDragEdges] = useState<{ lead: number; tail: number } | null>(null)
+  const pendingEdges = useRef<{ lead: number; tail: number } | null>(null)
+  const headRef = useRef(0)
+  const groupDelta = useRef<number | null>(null)
+  const setDragOffset = (v: number | null) => {
+    lastDelta.current = v === null ? null : v - (elements.find(e => e.id === dragging)?.offset_ms ?? 0)
+    setDragOffsetState(v)
+  }
   const canvas = useRef<HTMLCanvasElement>(null)
   const playhead = useRef<HTMLDivElement>(null)
   const lastRead = useRef(0)
@@ -140,8 +158,12 @@ export default function BottomPanel({
     .map(e => ({
       id: e.id,
       lane: laneOf(roleOf(e)),
-      startMs: shown.current.get(e.id) ?? e.start_ms,
-      durationMs: e.duration_ms,
+      startMs: (dragging === e.id && dragOffset !== null)
+        ? Math.max(e.start_ms + (dragOffset - (e.offset_ms ?? 0)), 0)
+        : shown.current.get(e.id) ?? e.start_ms,
+      durationMs: dragging === e.id && dragEdges
+        ? Math.max(e.duration_ms - dragEdges.lead - dragEdges.tail, 40)
+        : Math.max(e.duration_ms - (e.lead_silence_ms ?? 0) - (e.tail_silence_ms ?? 0), 40),
       url: clips.find(c => c.id === e.id)?.url,
       ready: e.status === 'approved' || !!e.series_asset_id,
     }))
@@ -199,9 +221,37 @@ export default function BottomPanel({
           }
         }
 
-        if (c.id === selectedId) {
+        const el = elements.find(x => x.id === c.id)
+        const fadeIn = el?.fade_in_ms ?? 0
+        const fadeOut = el?.fade_out_ms ?? 0
+        if ((fadeIn > 0 || fadeOut > 0) && w > 6) {
+          // The ramp is drawn as the part being taken away, which is how it reads at a
+          // glance: the clip arrives out of nothing and leaves into nothing.
           g.globalAlpha = 1
-          g.strokeStyle = '#e6f0fa'
+          g.fillStyle = '#0e1621'
+          if (fadeIn > 0) {
+            const fw = Math.min(px(fadeIn), w)
+            g.beginPath()
+            g.moveTo(x, y + 1)
+            g.lineTo(x + fw, y + 1)
+            g.lineTo(x, y + laneH - 1)
+            g.closePath()
+            g.fill()
+          }
+          if (fadeOut > 0) {
+            const fw = Math.min(px(fadeOut), w)
+            g.beginPath()
+            g.moveTo(x + w, y + 1)
+            g.lineTo(x + w - fw, y + 1)
+            g.lineTo(x + w, y + laneH - 1)
+            g.closePath()
+            g.fill()
+          }
+        }
+
+        if (c.id === selectedId || extraSelected?.has(c.id)) {
+          g.globalAlpha = 1
+          g.strokeStyle = c.id === selectedId ? '#e6f0fa' : '#7fb0e0'
           g.lineWidth = 1
           roundRect(g, x + 0.5, y + 1.5, Math.max(w - 1, 2), laneH - 3, 2)
           g.stroke()
@@ -216,6 +266,7 @@ export default function BottomPanel({
 
   function tick() {
     const ms = player.current?.currentMs ?? 0
+    headRef.current = ms
     moveHead(ms)
     // The number on screen does not need sixty updates a second; the line does.
     if (ms - lastRead.current > 100 || ms < lastRead.current) {
@@ -237,7 +288,11 @@ export default function BottomPanel({
       const list = await buildClips()
       if (list.length === 0) { setState('idle'); return }
       setClips(list)
-      await player.current.prepare(list, (done, t) => setProgress({ done, total: t }))
+      await player.current.prepare(
+        list,
+        (done, t) => setProgress({ done, total: t }),
+        onMeasured,
+      )
       draw()
     }
     player.current.play(fromMs)
@@ -254,6 +309,7 @@ export default function BottomPanel({
   function seek(ms: number) {
     const clamped = Math.max(0, Math.min(ms, total))
     setHead(clamped)
+    headRef.current = clamped
     lastRead.current = clamped
     moveHead(clamped)
     player.current?.seek(clamped)
@@ -292,20 +348,116 @@ export default function BottomPanel({
     return () => document.removeEventListener('keydown', onKey)
   })
 
-  /** Dragging anywhere on the lanes scrubs, and a click on a clip selects its line. */
+  /**
+   * Dragging empty lane scrubs. Dragging a clip moves it in time.
+   *
+   * Moving is what an editor does when something lands a beat late, and having to open a
+   * panel and type a number is why nobody adjusts anything. The move is written as an
+   * offset, so the rhythm engine keeps working around it.
+   */
   function onPointerDown(e: React.PointerEvent) {
     const rect = laneArea.current!.getBoundingClientRect()
-    const toMs = (clientX: number) =>
-      ((clientX - rect.left) / rect.width) * total
+    const toMs = (clientX: number) => ((clientX - rect.left) / rect.width) * total
 
     const y = e.clientY - rect.top
-    const laneIndex = Math.floor(y / LANE_H)
-    const lane = LANES[laneIndex]
+    const lane = LANES[Math.floor(y / LANE_H)]
     const ms = toMs(e.clientX)
-    if (lane) {
-      const hit = drawable.find(c =>
-        c.lane === lane && ms >= c.startMs && ms <= c.startMs + Math.max(c.durationMs, total * 0.004))
-      if (hit) onSelect(hit.id)
+
+    const hit = lane && drawable.find(c =>
+      c.lane === lane && ms >= c.startMs && ms <= c.startMs + Math.max(c.durationMs, total * 0.004))
+
+    if (hit) {
+      const additive = e.shiftKey || e.metaKey
+      onSelect(hit.id, additive)
+      const el = elements.find(x => x.id === hit.id)
+      if (!el) return
+
+      /* Everything selected moves by the same amount, so a scene keeps its internal shape. */
+      const group = extraSelected && extraSelected.size > 1 && extraSelected.has(hit.id)
+        ? elements.filter(x => extraSelected.has(x.id))
+        : [el]
+      const startOffsets = new Map(group.map(g => [g.id, g.offset_ms ?? 0]))
+
+      const pxPerMs = rect.width / total
+      const nearLeft = Math.abs(ms - hit.startMs) * pxPerMs < 6
+      const nearRight = Math.abs(ms - (hit.startMs + hit.durationMs)) * pxPerMs < 6
+      const mode: 'move' | 'left' | 'right' =
+        nearLeft ? 'left' : nearRight ? 'right' : 'move'
+
+      /*
+       * Trimming from the timeline writes the same lead and tail the silence detector
+       * uses, so it is not a cut: the file is untouched and the edges can be pulled back
+       * out again.
+       */
+      const startOffset = el.offset_ms ?? 0
+      const startLead = el.lead_silence_ms ?? 0
+      const startTail = el.tail_silence_ms ?? 0
+      const grabbedAt = ms
+      let moved = false
+      setDragging(hit.id)
+
+      /** Edges of every other clip, and the playhead, to pull towards. */
+      const magnets = [
+        headRef.current,
+        ...drawable.filter(c => c.id !== hit.id)
+          .flatMap(c => [c.startMs, c.startMs + c.durationMs]),
+      ]
+      const snap = (value: number) => {
+        const reach = total * 0.006
+        let best = value
+        let closest = reach
+        for (const m of magnets) {
+          const d = Math.abs(m - value)
+          if (d < closest) { closest = d; best = m }
+        }
+        return best
+      }
+
+      const move = (ev: PointerEvent) => {
+        const delta = toMs(ev.clientX) - grabbedAt
+        if (Math.abs(delta) < 24 && !moved) return
+        moved = true
+
+        if (mode === 'move') {
+          const snapped = snap(hit.startMs + delta) - hit.startMs
+          setDragOffset(Math.round(startOffset + (ev.shiftKey ? delta : snapped)))
+          groupDelta.current = ev.shiftKey ? delta : snapped
+        } else if (mode === 'left') {
+          pendingEdges.current = {
+            lead: Math.max(startLead + Math.round(delta), 0),
+            tail: startTail,
+          }
+          setDragEdges({ ...pendingEdges.current })
+        } else {
+          pendingEdges.current = {
+            lead: startLead,
+            tail: Math.max(startTail - Math.round(delta), 0),
+          }
+          setDragEdges({ ...pendingEdges.current })
+        }
+      }
+
+      const up = () => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+        setDragging(null)
+        if (moved) {
+          if (mode === 'move') {
+            const shift = Math.round(groupDelta.current ?? 0)
+            for (const g of group) onNudge(g.id, (startOffsets.get(g.id) ?? 0) + shift)
+          }
+          else if (pendingEdges.current) {
+            onTrimEdges(hit.id, pendingEdges.current.lead, pendingEdges.current.tail)
+          }
+          groupDelta.current = null
+        }
+        setDragOffset(null)
+        setDragEdges(null)
+        pendingEdges.current = null
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+      return
     }
 
     seek(ms)
@@ -319,7 +471,8 @@ export default function BottomPanel({
   }
 
   const selected = elements.find(e => e.id === selectedId) ?? null
-  function onNudge(delta: number) {
+  /** The dB trim buttons, named apart from the timing nudge they sit next to. */
+  function nudgeGain(delta: number) {
     if (selected) onGain(selected.id, Math.max(-24, Math.min(12, (selected.gain_db ?? 0) + delta)))
   }
 
@@ -354,11 +507,36 @@ export default function BottomPanel({
         {selected && (
           <div className="clip-tools">
             <span className="clip-name">{selected.text_content.slice(0, 34)}</span>
-            <button className="tp-btn" onClick={() => onNudge(-1)} title="Quieter by 1 dB">−</button>
+            <button className="tp-btn" onClick={() => nudgeGain(-1)} title="Quieter by 1 dB">−</button>
             <span className="fader-db tnum">
               {selected.gain_db > 0 ? '+' : ''}{selected.gain_db} dB
             </span>
-            <button className="tp-btn" onClick={() => onNudge(1)} title="Louder by 1 dB">+</button>
+            <button className="tp-btn" onClick={() => nudgeGain(1)} title="Louder by 1 dB">+</button>
+            <button className="tp-btn" onClick={() => onNudge(selected.id, (selected.offset_ms ?? 0) - 100)}
+              title="100 ms earlier">◀</button>
+            <span className="fader-db tnum">
+              {(selected.offset_ms ?? 0) > 0 ? '+' : ''}{selected.offset_ms ?? 0} ms
+            </span>
+            <button className="tp-btn" onClick={() => onNudge(selected.id, (selected.offset_ms ?? 0) + 100)}
+              title="100 ms later">▶</button>
+            <label className="clip-fade">
+              in
+              <input type="number" min={0} max={8000} step={100}
+                value={selected.fade_in_ms ?? 0}
+                onChange={e => onFade(selected.id, Number(e.target.value) || null, selected.fade_out_ms)} />
+            </label>
+            <label className="clip-fade">
+              out
+              <input type="number" min={0} max={8000} step={100}
+                value={selected.fade_out_ms ?? 0}
+                onChange={e => onFade(selected.id, selected.fade_in_ms, Number(e.target.value) || null)} />
+            </label>
+            <button className="btn" data-variant="quiet"
+              disabled={head <= selected.start_ms || head >= selected.start_ms + selected.duration_ms}
+              onClick={() => onSplit(selected.id, head)}
+              title="Cut this clip in two at the playhead">
+              Split
+            </button>
             <button className="btn" data-variant="quiet" onClick={onTrimSelected}>Trim</button>
           </div>
         )}

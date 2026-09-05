@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   parseScript, parseCast, estimateSpeechMs, layout, runtime, hash, formatMs,
 } from './parser'
+import { NO_PACING, DEFAULT_PACING, gapAfter } from './pacing'
 
 describe('parseScript', () => {
   it('separates dialogue from sound cues', () => {
@@ -188,7 +189,7 @@ describe('layout', () => {
 
   it('places line anchored elements end to end', () => {
     const els = [line('a', 0, 1000), line('b', 100, 2000), line('c', 200, 500)]
-    const starts = layout(els)
+    const starts = layout(els, NO_PACING)
     expect(starts.get('a')).toBe(0)
     expect(starts.get('b')).toBe(1000)
     expect(starts.get('c')).toBe(3000)
@@ -196,8 +197,8 @@ describe('layout', () => {
   })
 
   it('ripples: one longer take moves everything after it', () => {
-    const before = layout([line('a', 0, 1000), line('b', 100, 2000), line('c', 200, 500)])
-    const after = layout([line('a', 0, 1000), line('b', 100, 5000), line('c', 200, 500)])
+    const before = layout([line('a', 0, 1000), line('b', 100, 2000), line('c', 200, 500)], NO_PACING)
+    const after = layout([line('a', 0, 1000), line('b', 100, 5000), line('c', 200, 500)], NO_PACING)
     expect(after.get('c')! - before.get('c')!).toBe(3000)
   })
 
@@ -207,7 +208,7 @@ describe('layout', () => {
       { id: 'amb', idx: 50, anchor: 'scene' as const, duration_ms: 60000 },
       line('b', 100, 1000),
     ]
-    const starts = layout(els)
+    const starts = layout(els, NO_PACING)
     expect(starts.get('b')).toBe(1000)
     expect(runtime(els, starts)).toBe(2000)
   })
@@ -224,7 +225,7 @@ describe('layout', () => {
       { id: 'out', idx: 190, anchor: 'line' as const, duration_ms: 1000,
         block_id: 'b', block_role: 'return' as const, block_seq: 10 },
     ]
-    const starts = layout(els)
+    const starts = layout(els, NO_PACING)
     const first = starts.get('p0')!
     const last = starts.get('p9')!
     const ret = starts.get('out')!
@@ -249,7 +250,7 @@ describe('layout', () => {
       })),
       { id: 'out', idx: 190, anchor: 'line' as const, duration_ms: 1000,
         block_id: 'b', block_role: 'return' as const, block_seq: 10 },
-    ])
+    ], NO_PACING)
     const short = build(20000)
     const long = build(40000)
     expect(long.get('p9')!).toBeGreaterThan(short.get('p9')!)
@@ -267,5 +268,90 @@ describe('helpers', () => {
     expect(formatMs(0)).toBe('0:00')
     expect(formatMs(65000)).toBe('1:05')
     expect(formatMs(-500)).toBe('0:00')
+  })
+})
+
+describe('rhythm', () => {
+  const say = (id: string, idx: number, who: string, text: string, ms = 1000, scene = 'one') => ({
+    id, idx, anchor: 'line' as const, duration_ms: ms,
+    kind: 'dialogue', character_id: who, text_content: text, scene,
+  })
+
+  it('leaves more air between two speakers than within one', () => {
+    const twoPeople = layout([say('a', 0, 'nilo', 'Mi mamá está en la cocina.'),
+                              say('b', 100, 'sira', 'Eso no es un no.')])
+    const onePerson = layout([say('a', 0, 'nilo', 'Mi mamá está en la cocina.'),
+                              say('b', 100, 'nilo', 'Y ya sabes.')])
+    expect(twoPeople.get('b')!).toBeGreaterThan(onePerson.get('b')!)
+    expect(twoPeople.get('b')! - 1000).toBe(DEFAULT_PACING.turn)
+  })
+
+  it('leaves longer after a question than after a statement', () => {
+    const asked = layout([say('a', 0, 'sira', '¿Qué haces en el piso?'), say('b', 100, 'nilo', 'Nada.')])
+    const said = layout([say('a', 0, 'sira', 'Estás blanco.'), say('b', 100, 'nilo', 'Nada.')])
+    expect(asked.get('b')!).toBeGreaterThan(said.get('b')!)
+  })
+
+  it('leaves longest when a line trails off', () => {
+    const trailing = layout([say('a', 0, 'nilo', 'Espérate, espérate...'), say('b', 100, 'sira', 'Hola.')])
+    expect(trailing.get('b')! - 1000).toBe(DEFAULT_PACING.afterEllipsis)
+  })
+
+  it('opens a real gap between scenes', () => {
+    const across = layout([say('a', 0, 'nilo', 'Vale.', 1000, 'one'),
+                           say('b', 100, 'sira', 'Hola.', 1000, 'two')])
+    expect(across.get('b')! - 1000).toBe(DEFAULT_PACING.sceneChange)
+  })
+
+  it('slides a spot effect under the line before it', () => {
+    // A doorbell that waits politely for someone to finish sounds like a different room.
+    const withEffect = layout([
+      say('a', 0, 'nilo', 'Mi mamá está en la cocina.'),
+      { id: 'fx', idx: 100, anchor: 'line' as const, duration_ms: 500,
+        kind: 'sfx', character_id: null, text_content: 'Timbre.', scene: 'one' },
+    ])
+    expect(withEffect.get('fx')!).toBeLessThan(1000)
+  })
+
+  it('skips the silence recorded into a take', () => {
+    // ElevenLabs leaves a moment of nothing at each end of every file.
+    const trimmed = layout([
+      { id: 'a', idx: 0, anchor: 'line' as const, duration_ms: 1000,
+        lead_silence_ms: 150, tail_silence_ms: 250,
+        kind: 'dialogue', character_id: 'nilo', text_content: 'Hola.', scene: 'one' },
+      say('b', 100, 'nilo', 'Adiós.'),
+    ])
+    // 1000 minus 400 of silence, plus the same speaker gap.
+    expect(trimmed.get('b')!).toBe(600 + DEFAULT_PACING.sameSpeaker)
+  })
+
+  it('brings music in before the line it belongs to', () => {
+    // A bed that waits for the previous line to finish announces itself as an edit.
+    const withMusic = layout([
+      say('a', 0, 'narradora', 'Los domingos por la mañana.', 4000),
+      { id: 'bed', idx: 100, anchor: 'scene' as const, duration_ms: 120000,
+        kind: 'music', character_id: null, text_content: 'Cama de tensión', scene: 'one' },
+    ])
+    expect(withMusic.get('bed')!).toBeLessThan(4000)
+  })
+
+  it('never puts an element before zero', () => {
+    const first = layout([{ id: 'fx', idx: 0, anchor: 'line' as const, duration_ms: 500,
+      kind: 'sfx', character_id: null, text_content: 'Timbre.', scene: 'one' }])
+    expect(first.get('fx')).toBe(0)
+  })
+})
+
+describe('gapAfter', () => {
+  const shape = (kind: string, text = '', who: string | null = null, scene = 'one') =>
+    ({ kind, character_id: who, text_content: text, scene })
+
+  it('gives a pause no gap of its own, because it is already a gap', () => {
+    expect(gapAfter(shape('pause'), shape('dialogue'), DEFAULT_PACING)).toBe(0)
+    expect(gapAfter(shape('dialogue'), shape('pause'), DEFAULT_PACING)).toBe(0)
+  })
+
+  it('gives nothing after the last element', () => {
+    expect(gapAfter(shape('dialogue'), undefined, DEFAULT_PACING)).toBe(0)
   })
 })

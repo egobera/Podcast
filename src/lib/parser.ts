@@ -1,4 +1,5 @@
 import type { ElementKind, Anchor, GainRole } from './types'
+import { gapAfter, leadFor, DEFAULT_PACING, type Pacing } from './pacing'
 
 /** A block marker found in the script, and the range of elements it wraps. */
 export interface BlockMark {
@@ -292,6 +293,14 @@ export interface Placeable {
   block_id?: string | null
   block_role?: 'entry' | 'pulse' | 'return' | null
   block_seq?: number
+  /** Everything below feeds the rhythm, and is optional so tests can stay small. */
+  kind?: string
+  character_id?: string | null
+  text_content?: string
+  scene?: string
+  offset_ms?: number
+  lead_silence_ms?: number
+  tail_silence_ms?: number
 }
 
 /**
@@ -307,15 +316,49 @@ export interface Placeable {
  * frozen time, so their spacing follows the rhythm of the monologue rather than the clock.
  * The last pulse lands just before the return.
  */
-export function layout<T extends Placeable>(elements: T[]): Map<string, number> {
+export function layout<T extends Placeable>(
+  elements: T[],
+  pacing: Pacing = DEFAULT_PACING,
+): Map<string, number> {
   const starts = new Map<string, number>()
   const ordered = [...elements].sort((a, b) => a.idx - b.idx)
 
+  const timed = ordered.filter(e => e.block_role !== 'pulse')
+
   let cursor = 0
-  for (const el of ordered) {
-    if (el.block_role === 'pulse') continue // placed in the second pass
-    starts.set(el.id, cursor)
-    if (el.anchor === 'line') cursor += el.duration_ms
+  for (let i = 0; i < timed.length; i++) {
+    const el = timed[i]
+
+    /*
+     * Silence recorded into the file is not silence anybody asked for. Every generated
+     * take carries a bit at each end, and 115 of them add up to half a minute of dead air
+     * spread through the episode. It is skipped, and the gap that belongs there is added
+     * back deliberately.
+     */
+    const lead = el.lead_silence_ms ?? 0
+    const tail = el.tail_silence_ms ?? 0
+    const sounding = Math.max(el.duration_ms - lead - tail, 0)
+
+    const shape = {
+      kind: el.kind ?? 'sfx',
+      character_id: el.character_id ?? null,
+      text_content: el.text_content ?? '',
+      scene: el.scene ?? '',
+    }
+    const nextEl = timed[i + 1]
+    const nextShape = nextEl && {
+      kind: nextEl.kind ?? 'sfx',
+      character_id: nextEl.character_id ?? null,
+      text_content: nextEl.text_content ?? '',
+      scene: nextEl.scene ?? '',
+    }
+
+    const at = cursor + leadFor(shape, pacing) + (el.offset_ms ?? 0)
+    starts.set(el.id, Math.max(at, 0))
+
+    if (el.anchor === 'line') {
+      cursor += sounding + gapAfter(shape, nextShape, pacing)
+    }
   }
 
   // Second pass: distribute the pulses of each block across the gap it wraps.
@@ -349,7 +392,8 @@ export function runtime<T extends Placeable>(elements: T[], starts: Map<string, 
   let max = 0
   for (const el of elements) {
     const start = starts.get(el.id) ?? 0
-    const end = el.anchor === 'line' ? start + el.duration_ms : start
+    const sounding = el.duration_ms - (el.lead_silence_ms ?? 0) - (el.tail_silence_ms ?? 0)
+    const end = el.anchor === 'line' ? start + Math.max(sounding, 0) : start
     if (end > max) max = end
   }
   return max

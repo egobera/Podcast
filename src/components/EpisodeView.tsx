@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, callFunction, signedUrl, uploadAudio, readDuration } from '../lib/supabase'
 import {
-  parseScript, uniqueCharacters, formatMs, hash, layout, runtime,
+  parseScript, uniqueCharacters, formatMs, hash, layout, runtime, estimateSpeechMs,
   IDX_SCRIPT_START, IDX_STEP,
 } from '../lib/parser'
 import { insertBlock, removeBlock, insertVaultAsset, findCueSpans, applyTemplate, missingTemplateAssets } from '../lib/template'
+import { pacingFor } from '../lib/pacing'
+import { useHistory } from '../lib/history'
 import ManualNote from './ManualNote'
 import Inspector from './Inspector'
 import Suggestions from './Suggestions'
@@ -17,6 +19,7 @@ import { autofillVault, seedVault } from '../lib/autofill'
 import ExportPanel from './ExportPanel'
 import { Play as PlayIcon, Pause as PauseIcon, Check as CheckIcon } from './icons'
 import { usePreview } from '../lib/usePreview'
+import { findEdges } from '../lib/player'
 import type { Clip } from '../lib/player'
 import type { AudioElement, Character, Comment, Episode, Job, Project, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
@@ -39,6 +42,7 @@ export default function EpisodeView({
   const [missingThemes, setMissingThemes] = useState<{ id: string; name: string }[]>([])
   const [takes, setTakes] = useState<Record<string, Take[]>>({})
   const [selected, setSelected] = useState<string | null>(null)
+  const [alsoSelected, setAlsoSelected] = useState<Set<string>>(new Set())
   const [script, setScript] = useState(episode.script_text ?? '')
   const [importing, setImporting] = useState(false)
   const [job, setJob] = useState<Job | null>(null)
@@ -57,6 +61,7 @@ export default function EpisodeView({
   const [filter, setFilter] = useState<'all' | 'todo' | 'review' | 'done'>('all')
   const toast = useToast()
   const preview = usePreview()
+  const history = useHistory(() => load())
   const uploadInput = useRef<HTMLInputElement | null>(null)
   const uploadTarget = useRef<string | null>(null)
 
@@ -274,14 +279,24 @@ export default function EpisodeView({
     await load()
   }
 
-  async function generateOne(el: AudioElement) {
-    preview.stop()   // nothing should keep playing over the take being replaced
+  /**
+   * One take, or three.
+   *
+   * A single generation forces you to judge it against a memory of the last one, which is
+   * a bad way to choose a performance. Three at once turns it into a comparison, and the
+   * difference between them is usually larger than the difference a prompt tweak makes.
+   */
+  async function generateOne(el: AudioElement, count = 1) {
+    preview.stop()
     setBusyId(el.id)
     setError('')
     try {
-      await callFunction('generate-element', { element_id: el.id })
+      for (let i = 0; i < count; i++) {
+        await callFunction('generate-element', { element_id: el.id })
+      }
       await load()
       await loadTakes(el.id)
+      if (count > 1) toast(`${count} takes ready. Play them one after the other.`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Generation failed')
     } finally {
@@ -302,11 +317,30 @@ export default function EpisodeView({
    */
   async function runFirstPass() {
     preview.stop()
+
     const pending = elements.filter(e => e.status === 'missing' || e.status === 'stale')
-    if (pending.length === 0) { toast('Nothing left to generate.'); return }
+
+    /*
+     * Vault entries the episode points at but nobody has filled.
+     *
+     * These elements arrive marked approved, because a vault asset is meant to exist
+     * already, so the batch skipped them and the episode played silence where a doorbell
+     * should be. They belong in the same run.
+     */
+    const usedAssetIds = new Set(
+      elements.map(e => e.series_asset_id).filter(Boolean) as string[],
+    )
+    const emptyAssets = assets.filter(a =>
+      usedAssetIds.has(a.id) && !a.storage_path && a.kind === 'sfx')
+
+    if (pending.length === 0 && emptyAssets.length === 0) {
+      toast('Nothing left to generate.')
+      return
+    }
 
     cancelRun.current = false
-    setRun({ done: 0, failed: 0, total: pending.length, error: '' })
+    const total = pending.length + emptyAssets.length
+    setRun({ done: 0, failed: 0, total, error: '' })
 
     const queue = [...pending]
     let done = 0
@@ -324,11 +358,27 @@ export default function EpisodeView({
           failed++
           lastError = e instanceof Error ? e.message : String(e)
         }
-        setRun({ done, failed, total: pending.length, error: lastError })
+        setRun({ done, failed, total, error: lastError })
       }
     })
 
     await Promise.all(workers)
+
+    for (const asset of emptyAssets) {
+      if (cancelRun.current) break
+      try {
+        await callFunction('generate-sound', {
+          asset_id: asset.id,
+          prompt: (asset.description ?? '').trim() || asset.name,
+          seconds: asset.expected_ms ? asset.expected_ms / 1000 : undefined,
+        })
+        done++
+      } catch (e) {
+        failed++
+        lastError = e instanceof Error ? e.message : String(e)
+      }
+      setRun({ done, failed, total, error: lastError })
+    }
     await load()
     setRun(null)
 
@@ -337,11 +387,93 @@ export default function EpisodeView({
     else toast(`${done} takes ready to review.`)
   }
 
+  /**
+   * Approve everything that generated cleanly.
+   *
+   * Approval locks a take and pins the timing to the audio. Doing that 150 times by hand
+   * after a first pass is the largest piece of work left, and nothing about it is a
+   * judgement: the judgement is which takes to redo, and that is easier to make once the
+   * whole thing plays.
+   */
+  async function approveAll() {
+    const waiting = elements.filter(e => e.status === 'generated')
+    if (waiting.length === 0) { toast('Nothing waiting for approval.'); return }
+
+    const before = waiting.map(e => ({
+      id: e.id, status: e.status, approved_take_id: e.approved_take_id,
+    }))
+
+    setBusyId('bulk')
+    try {
+      const { data: takeRows } = await supabase.from('takes')
+        .select('id, element_id, storage_path, duration_ms, created_at')
+        .in('element_id', waiting.map(e => e.id))
+        .order('created_at', { ascending: false })
+
+      const newest = new Map<string, { id: string; duration_ms: number }>()
+      for (const t of takeRows ?? []) {
+        if (!newest.has(t.element_id)) newest.set(t.element_id, { id: t.id, duration_ms: t.duration_ms })
+      }
+
+      for (const el of waiting) {
+        const take = newest.get(el.id)
+        if (!take) continue
+        await supabase.from('elements').update({
+          approved_take_id: take.id,
+          status: 'approved',
+          duration_ms: take.duration_ms || el.duration_ms,
+          source_hash: hash(el.text_content),
+        }).eq('id', el.id)
+      }
+
+      await load()
+      history.record({
+        label: `approve ${waiting.length}`,
+        undo: async () => {
+          for (const row of before) {
+            await supabase.from('elements')
+              .update({ status: row.status, approved_take_id: row.approved_take_id })
+              .eq('id', row.id)
+          }
+        },
+        redo: async () => {
+          for (const el of waiting) {
+            const take = newest.get(el.id)
+            if (take) {
+              await supabase.from('elements')
+                .update({ status: 'approved', approved_take_id: take.id }).eq('id', el.id)
+            }
+          }
+        },
+      })
+      toast(`${waiting.length} approved. Listen, and redo the ones that are wrong.`)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function approve(el: AudioElement, take: Take, advance = false) {
+    // Measure the dead air at each end once, here, so the timeline can skip it from now on.
+    let lead = 0
+    let tail = 0
+    try {
+      const url = await signedUrl(take.storage_path)
+      if (url) {
+        const ctx = new AudioContext()
+        const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer())
+        const edges = findEdges(buf)
+        lead = Math.round(edges.lead * 1000)
+        tail = Math.round(edges.tail * 1000)
+        await ctx.close()
+      }
+    } catch { /* measuring is a bonus, not a requirement */ }
+
     await supabase.from('elements').update({
       approved_take_id: take.id,
       status: 'approved',
       duration_ms: take.duration_ms || el.duration_ms,
+      lead_silence_ms: lead,
+      tail_silence_ms: tail,
       source_hash: hash(el.text_content),
     }).eq('id', el.id)
     await load()
@@ -408,6 +540,7 @@ export default function EpisodeView({
   }
 
   const positionedRef = useRef<(AudioElement & { start_ms: number })[]>([])
+  const totalRef = useRef(0)
 
   /** Resolves every playable element to a signed URL so the mix can be assembled. */
   const buildClips = useCallback(async (): Promise<Clip[]> => {
@@ -457,18 +590,48 @@ export default function EpisodeView({
       clips.push({
         id: el.id, url, startMs: el.start_ms, durationMs: el.duration_ms,
         role, anchor: el.anchor, gainDb: el.gain_db ?? 0,
+        leadMs: el.lead_silence_ms ?? 0,
+        fadeInMs: el.fade_in_ms ?? undefined,
+        fadeOutMs: el.fade_out_ms ?? undefined,
       })
     }
+    /*
+     * Room tone, under everything.
+     *
+     * The gaps between lines were true digital silence, and nothing recorded in a real
+     * room is ever that quiet. That absolute nothing between every line is a large part
+     * of why an episode sounds synthetic. One very quiet bed, looped underneath, is what
+     * makes the silences sound like a room instead of a file.
+     */
+    const under = assets.find(a => a.auto_place === 'under' && a.storage_path)
+    if (under) {
+      const url = await signedUrl(under.storage_path!)
+      if (url) {
+        clips.push({
+          id: `roomtone-${under.id}`,
+          url,
+          startMs: 0,
+          durationMs: totalRef.current,
+          role: 'ambience',
+          anchor: 'scene',
+          gainDb: -12,
+          loop: true,
+          loopUntilMs: totalRef.current,
+        })
+      }
+    }
+
     return clips
   }, [assets, toast])
 
-  const starts = useMemo(() => layout(elements), [elements])
+  const starts = useMemo(() => layout(elements, pacingFor(episode)), [elements, episode])
   const positioned = useMemo(
     () => elements.map(e => ({ ...e, start_ms: starts.get(e.id) ?? 0 }))
       .sort((a, b) => a.start_ms - b.start_ms || a.idx - b.idx),
     [elements, starts],
   )
   const total = useMemo(() => runtime(elements, starts), [elements, starts])
+  totalRef.current = total
 
   positionedRef.current = positioned
 
@@ -620,6 +783,25 @@ export default function EpisodeView({
             Generate first pass
           </button>
         )}
+        {counts.review > 0 && (
+          <button className="btn" disabled={busyId === 'bulk'} onClick={approveAll}
+            title="Lock every take that is waiting, and pin the timings to the audio">
+            {busyId === 'bulk' ? 'Approving' : `Approve ${counts.review}`}
+          </button>
+        )}
+
+        <div className="undo-pair">
+          <button className="btn" data-variant="quiet" disabled={!history.canUndo}
+            onClick={() => history.undo()}
+            title={history.canUndo ? `Undo ${history.lastLabel} (⌘Z)` : 'Nothing to undo'}>
+            Undo
+          </button>
+          <button className="btn" data-variant="quiet" disabled={!history.canRedo}
+            onClick={() => history.redo()}
+            title={history.canRedo ? `Redo ${history.nextLabel} (⇧⌘Z)` : 'Nothing to redo'}>
+            Redo
+          </button>
+        </div>
         <button className="btn" onClick={() => setExporting(true)}>Export</button>
       </div>
 
@@ -735,6 +917,7 @@ export default function EpisodeView({
           <span><Keys>a</Keys> approve</span>
           <span><Keys>g</Keys> new take</span>
           <span><Keys>n</Keys> next gap</span>
+          <span><Keys>⌘Z</Keys> undo</span>
         </div>
 
         <ManualNote topic="fine-edit" />
@@ -777,7 +960,7 @@ export default function EpisodeView({
           if (!selectedEl) return
           supabase.from('elements').update(fields).eq('id', selectedEl.id).then(load)
         }}
-        onGenerate={() => selectedEl && generateOne(selectedEl)}
+        onGenerate={count => selectedEl && generateOne(selectedEl, count ?? 1)}
         onUpload={() => { if (selectedEl) { uploadTarget.current = selectedEl.id; uploadInput.current?.click() } }}
         onApprove={t => selectedEl && approve(selectedEl, t)}
         onPlayTake={async t => {
@@ -793,6 +976,188 @@ export default function EpisodeView({
         onExport={() => setExporting(true)}
         onDeleteEpisode={() => setDeleting(true)}
         missingThemes={missingThemes}
+        readiness={(() => {
+          /*
+           * What still stands between this episode and hearing it end to end. Not a to do
+           * list of everything: only the things that make the difference between silence
+           * and a first listen.
+           */
+          const voiced = new Set(chars.filter(c => c.voice_id).map(c => c.id))
+          const speaking = new Set(
+            elements.filter(e => e.kind === 'dialogue').map(e => e.character_id).filter(Boolean) as string[],
+          )
+          const withoutVoice = [...speaking].filter(id => !voiced.has(id))
+
+          const lines = elements.filter(e => e.kind === 'dialogue')
+          const silentLines = lines.filter(e => e.status === 'missing' || e.status === 'stale')
+
+          const usedAssets = new Set(elements.map(e => e.series_asset_id).filter(Boolean) as string[])
+          const emptyAssets = assets.filter(a => usedAssets.has(a.id) && !a.storage_path)
+
+          const guessed = elements.filter(e =>
+            e.kind === 'dialogue' && e.status !== 'missing' && !e.lead_silence_ms && !e.tail_silence_ms)
+
+          return [
+            {
+              label: withoutVoice.length === 0
+                ? 'Every speaking character has a voice'
+                : `${withoutVoice.length} characters still need a voice`,
+              done: withoutVoice.length === 0,
+              hint: 'Open Characters and design or clone one. Nothing generates without it.',
+            },
+            {
+              label: silentLines.length === 0
+                ? 'Every line has audio'
+                : `${silentLines.length} of ${lines.length} lines have no audio`,
+              done: silentLines.length === 0,
+              hint: 'Generate first pass makes them all in one run.',
+            },
+            {
+              label: emptyAssets.length === 0
+                ? 'Every sound this episode asks for exists'
+                : `${emptyAssets.length} vault sounds are still empty`,
+              done: emptyAssets.length === 0,
+              hint: 'They play as silence until they have audio. The first pass now fills them too.',
+            },
+            {
+              label: missingThemes.length === 0 ? 'Themes are in place' : 'Themes are missing',
+              done: missingThemes.length === 0,
+              hint: 'Place them from the button above.',
+            },
+            {
+              label: guessed.length === 0
+                ? 'Timings come from the audio'
+                : `${guessed.length} lines are still placed by word count`,
+              done: guessed.length === 0,
+              hint: 'Press play once and they measure themselves.',
+            },
+          ]
+        })()}
+        onEditText={async text => {
+          if (!selectedEl) return
+          const clean = text.trim()
+          if (!clean || clean === selectedEl.text_content) return
+          const before = {
+            text_content: selectedEl.text_content,
+            source_hash: selectedEl.source_hash,
+            status: selectedEl.status,
+            duration_ms: selectedEl.duration_ms,
+          }
+          const id = selectedEl.id
+          history.record({
+            label: 'edit the line',
+            undo: async () => { await supabase.from('elements').update(before).eq('id', id) },
+            redo: async () => {
+              await supabase.from('elements').update({
+                text_content: clean, source_hash: hash(clean), status: 'stale',
+              }).eq('id', id)
+            },
+          })
+          await supabase.from('elements').update({
+            text_content: clean,
+            source_hash: hash(clean),
+            // The approved audio says the old words, so it is no longer approved.
+            status: selectedEl.status === 'approved' ? 'stale' : selectedEl.status,
+            duration_ms: selectedEl.kind === 'dialogue'
+              ? estimateSpeechMs(clean)
+              : selectedEl.duration_ms,
+          }).eq('id', selectedEl.id)
+          await load()
+          toast(selectedEl.status === 'approved'
+            ? 'Line changed. It needs a new take.'
+            : 'Line changed.')
+        }}
+        onDeleteElement={async () => {
+          if (!selectedEl) return
+          // Keep the whole row so undo can put it back exactly as it was.
+          const { data: full } = await supabase.from('elements')
+            .select('*').eq('id', selectedEl.id).single()
+          await supabase.from('elements').delete().eq('id', selectedEl.id)
+          setSelected(null)
+          await load()
+          if (full) {
+            history.record({
+              label: 'delete the line',
+              undo: async () => { await supabase.from('elements').insert(full) },
+              redo: async () => { await supabase.from('elements').delete().eq('id', full.id) },
+            })
+          }
+          toast('Line deleted. Everything after it moved up.')
+        }}
+        onInsertAfter={async kind => {
+          if (!selectedEl) return
+
+          /*
+           * A script is a starting point, not a cage. Anything an episode needs can be
+           * added here: another line, a sound the script never mentioned, a bed under a
+           * moment, a silence, or a scene break that regroups everything after it.
+           */
+          const base = {
+            episode_id: episode.id,
+            idx: selectedEl.idx + 25,
+            scene: selectedEl.scene,
+            origin: 'script' as const,
+            status: 'missing' as const,
+          }
+
+          const shapes: Record<string, Record<string, unknown>> = {
+            dialogue: {
+              kind: 'dialogue', character_id: selectedEl.character_id,
+              text_content: 'Una línea nueva.', anchor: 'line', gain_role: 'voice',
+              duration_ms: 2000,
+            },
+            sfx: {
+              kind: 'sfx', text_content: 'Un sonido nuevo.', anchor: 'line',
+              gain_role: 'spot', duration_ms: 3000,
+            },
+            ambience: {
+              kind: 'ambience', text_content: 'AMBIENTE · Un lugar nuevo.', anchor: 'scene',
+              gain_role: 'ambience', duration_ms: 12000,
+            },
+            music: {
+              kind: 'music', text_content: 'MÚSICA · Una cama nueva.', anchor: 'scene',
+              gain_role: 'bed', duration_ms: 60000,
+            },
+            pause: {
+              kind: 'pause', text_content: 'Silencio. 2 segundos.', anchor: 'line',
+              gain_role: 'auto', duration_ms: 2000, status: 'approved' as const,
+            },
+          }
+
+          if (kind === 'scene') {
+            // A scene break renames everything from here on, so the rhythm engine opens a
+            // real gap and the script reads as two places instead of one long one.
+            const name = `Escena ${new Set(elements.map(e => e.scene)).size + 1}`
+            const after = positionedRef.current
+              .filter(e => e.idx >= selectedEl.idx && e.scene === selectedEl.scene)
+            for (const e of after) {
+              await supabase.from('elements').update({ scene: name }).eq('id', e.id)
+            }
+            await load()
+            toast(`Scene break added. ${after.length} elements moved into ${name}.`)
+            return
+          }
+
+          const { data } = await supabase.from('elements')
+            .insert({ ...base, ...shapes[kind] }).select().single()
+          await load()
+          if (data) {
+            const made = data as AudioElement
+            setSelected(made.id)
+            history.record({
+              label: 'add',
+              undo: async () => { await supabase.from('elements').delete().eq('id', made.id) },
+              redo: async () => { await supabase.from('elements').insert(data) },
+            })
+            toast(kind === 'pause' ? 'Silence added.' : 'Added. Write it and generate.')
+          }
+        }}
+        onPacing={async next => {
+          const merged = { ...pacingFor(episode), ...next }
+          await supabase.from('episodes').update({ pacing: merged }).eq('id', episode.id)
+          episode.pacing = merged
+          setElements(e => [...e])
+        }}
         onPlaceThemes={async () => {
           const placed = await applyTemplate(episode.id, project.id)
           await load()
@@ -956,9 +1321,137 @@ export default function EpisodeView({
           episode.lane_gain = next
           setElements(e => [...e])
         }}
+        onNudge={async (id, offsetMs) => {
+          const before = elements.find(e => e.id === id)?.offset_ms ?? 0
+          const set = async (v: number) => {
+            await supabase.from('elements').update({ offset_ms: v }).eq('id', id)
+            setElements(list => list.map(e => (e.id === id ? { ...e, offset_ms: v } : e)))
+          }
+          await set(offsetMs)
+          history.record({
+            label: 'move',
+            undo: () => set(before),
+            redo: () => set(offsetMs),
+          })
+        }}
+        onMeasured={async measured => {
+          /*
+           * Write back only what is still a guess. Anything already measured, trimmed by
+           * hand or approved keeps the value it has, or listening would quietly undo the
+           * edits somebody made.
+           */
+          const pending = measured.filter(m => {
+            const el = elements.find(e => e.id === m.id)
+            if (!el || el.kind === 'pause' || el.series_asset_id) return false
+            if (el.lead_silence_ms || el.tail_silence_ms) return false
+            return Math.abs(el.duration_ms - m.durationMs) > 120
+          })
+          if (pending.length === 0) return
+
+          for (const m of pending) {
+            await supabase.from('elements').update({
+              duration_ms: m.durationMs,
+              lead_silence_ms: m.leadMs,
+              tail_silence_ms: m.tailMs,
+            }).eq('id', m.id)
+          }
+          await load()
+          toast(`${pending.length} lines now sit where the audio actually falls.`)
+        }}
+        onFade={async (id, inMs, outMs) => {
+          const el = elements.find(e => e.id === id)
+          const before = { fade_in_ms: el?.fade_in_ms ?? null, fade_out_ms: el?.fade_out_ms ?? null }
+          const set = async (v: { fade_in_ms: number | null; fade_out_ms: number | null }) => {
+            await supabase.from('elements').update(v).eq('id', id)
+            setElements(list => list.map(e => (e.id === id ? { ...e, ...v } : e)))
+          }
+          const next = { fade_in_ms: inMs, fade_out_ms: outMs }
+          await set(next)
+          history.record({ label: 'fade', undo: () => set(before), redo: () => set(next) })
+        }}
+        onSplit={async (id, atMs) => {
+          /*
+           * Splitting does not cut the file. The first half keeps the audio and gains a
+           * tail trim; the second half is a new element pointing at the same audio with a
+           * matching lead trim. Nothing is destroyed, and a silence or another sound can
+           * go in the join.
+           */
+          const el = positionedRef.current.find(e => e.id === id)
+          if (!el) return
+          const into = Math.round(atMs - el.start_ms)
+          if (into < 200 || into > el.duration_ms - 200) {
+            toast('Put the playhead further inside the clip.', 'bad')
+            return
+          }
+
+          const lead = el.lead_silence_ms ?? 0
+          const { data } = await supabase.from('elements').insert({
+            episode_id: episode.id,
+            idx: el.idx + 25,
+            scene: el.scene,
+            kind: el.kind,
+            character_id: el.character_id,
+            series_asset_id: el.series_asset_id,
+            approved_take_id: el.approved_take_id,
+            text_content: `${el.text_content} (2)`,
+            direction: el.direction,
+            origin: el.origin,
+            anchor: el.anchor,
+            gain_role: el.gain_role,
+            gain_db: el.gain_db,
+            duration_ms: el.duration_ms,
+            lead_silence_ms: lead + into,
+            tail_silence_ms: el.tail_silence_ms ?? 0,
+            status: el.status,
+          }).select().single()
+
+          const firstTail = Math.max(el.duration_ms - lead - into, 0)
+          await supabase.from('elements')
+            .update({ tail_silence_ms: firstTail }).eq('id', el.id)
+          await load()
+
+          if (data) {
+            const made = data as AudioElement
+            history.record({
+              label: 'split',
+              undo: async () => {
+                await supabase.from('elements').delete().eq('id', made.id)
+                await supabase.from('elements')
+                  .update({ tail_silence_ms: el.tail_silence_ms ?? 0 }).eq('id', el.id)
+              },
+              redo: async () => {
+                await supabase.from('elements').insert(data)
+                await supabase.from('elements')
+                  .update({ tail_silence_ms: firstTail }).eq('id', el.id)
+              },
+            })
+            toast('Split. Both halves point at the same audio, so nothing was cut.')
+          }
+        }}
+        onTrimEdges={async (id, leadMs, tailMs) => {
+          const el = elements.find(e => e.id === id)
+          const before = { lead: el?.lead_silence_ms ?? 0, tail: el?.tail_silence_ms ?? 0 }
+          const set = async (lead: number, tail: number) => {
+            await supabase.from('elements')
+              .update({ lead_silence_ms: lead, tail_silence_ms: tail }).eq('id', id)
+            setElements(list => list.map(e =>
+              e.id === id ? { ...e, lead_silence_ms: lead, tail_silence_ms: tail } : e))
+          }
+          await set(leadMs, tailMs)
+          history.record({
+            label: 'trim',
+            undo: () => set(before.lead, before.tail),
+            redo: () => set(leadMs, tailMs),
+          })
+        }}
         onGain={async (id, db) => {
-          await supabase.from('elements').update({ gain_db: db }).eq('id', id)
-          setElements(list => list.map(e => (e.id === id ? { ...e, gain_db: db } : e)))
+          const before = elements.find(e => e.id === id)?.gain_db ?? 0
+          const set = async (v: number) => {
+            await supabase.from('elements').update({ gain_db: v }).eq('id', id)
+            setElements(list => list.map(e => (e.id === id ? { ...e, gain_db: v } : e)))
+          }
+          await set(db)
+          history.record({ label: 'level', undo: () => set(before), redo: () => set(db) })
         }}
         onTrimSelected={async () => {
           const el = positionedRef.current.find(e => e.id === selected)
@@ -974,7 +1467,15 @@ export default function EpisodeView({
           if (!path) { toast('That line has no approved audio to trim yet.', 'bad'); return }
           setTrimming({ path, title: el.text_content.slice(0, 30) })
         }}
-        onSelect={id => {
+        extraSelected={alsoSelected}
+        onSelect={(id, additive) => {
+          setAlsoSelected(prev => {
+            if (!additive) return new Set([id])
+            const next = new Set(prev)
+            next.has(id) ? next.delete(id) : next.add(id)
+            next.add(selected ?? id)
+            return next
+          })
           setSelected(id)
           loadTakes(id)
           const i = visibleRef.current.findIndex(v => v.id === id)

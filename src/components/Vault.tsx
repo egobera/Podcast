@@ -21,6 +21,10 @@ const SUGGESTIONS = [
   { name: 'Closing theme', kind: 'theme_close', auto: 'close', hint: 'Plays at the end of every episode.' },
   { name: 'Tension bed', kind: 'bed', auto: 'none', hint: 'Loops under scenes that need pressure.' },
   { name: 'Emotional bed', kind: 'bed', auto: 'none', hint: 'Loops under the scenes that carry weight.' },
+  {
+    name: 'Room tone', kind: 'bed', auto: 'under',
+    hint: 'A breath of room under everything, so the gaps are not digital silence.',
+  },
 ]
 
 export default function Vault({
@@ -183,9 +187,31 @@ export default function Vault({
             {accentsFor(project.language_code).map(a => <option key={a} value={a}>{a}</option>)}
           </select>
         </div>
+        <div className="field">
+          <label>Sound literalness {(project.prompt_influence ?? 0.4).toFixed(2)}</label>
+          <input type="range" min={0} max={1} step={0.05}
+            defaultValue={project.prompt_influence ?? 0.4}
+            onMouseUp={e => setLanguage({
+              prompt_influence: Number((e.target as HTMLInputElement).value),
+            })} />
+          <span className="hint">
+            Low, the generator interprets and you get something atmospheric. High, it follows the
+            words and you get the doorbell you asked for. Around 0.4 suits ambiences, 0.7 suits
+            single hits.
+          </span>
+        </div>
+
+        <label className="trim-toggle" style={{ gridColumn: '1 / -1' }}>
+          <input type="checkbox" defaultChecked={project.context_lines !== false}
+            onChange={e => setLanguage({ context_lines: e.target.checked })} />
+          Give the model the lines before and after
+        </label>
+
         <p className="notice lang-note">
           The language goes to the model so it reads numbers and abbreviations by the right rules.
           The accent is not a setting the model takes: it comes from the voices you pick or record.
+          Line context is what stops each line being generated from a standing start: with it, a
+          question keeps its lift and the answer begins where the question left off.
         </p>
       </div>
 
@@ -309,6 +335,7 @@ export default function Vault({
                 <option value="none">Not placed automatically</option>
                 <option value="open">Opens every episode</option>
                 <option value="close">Closes every episode</option>
+                <option value="under">Runs quietly under the whole episode</option>
               </select>
             </label>
 
@@ -487,6 +514,7 @@ export default function Vault({
           title={trim.name}
           userId={userId}
           projectId={project.id}
+          expectedMs={trim.expected_ms}
           onSaved={(newPath, ms) => patch(trim.id, {
             storage_path: newPath, duration_ms: ms, version: trim.version + 1,
           })}

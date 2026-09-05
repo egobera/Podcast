@@ -19,8 +19,23 @@ export default async function handler(req: Request) {
   const projectId = owned.project_id as string
 
   const { data: project } = await db.from('projects')
-    .select('language_code').eq('id', projectId).single()
+    .select('language_code, prompt_influence, context_lines').eq('id', projectId).single()
   const languageCode = project?.language_code ?? 'es'
+  const influence = project?.prompt_influence ?? 0.4
+  const useContext = project?.context_lines !== false
+
+  // Every spoken line in order, so each generation can see its neighbours.
+  const { data: spoken } = await db.from('elements')
+    .select('idx, text_content').eq('episode_id', episode_id).eq('kind', 'dialogue').order('idx')
+  const line = (spoken ?? []) as { idx: number; text_content: string }[]
+  const neighbours = (idx: number) => {
+    if (!useContext) return { previousText: '', nextText: '' }
+    const i = line.findIndex(x => x.idx === idx)
+    return {
+      previousText: i > 0 ? line[i - 1].text_content : '',
+      nextText: i >= 0 && i < line.length - 1 ? line[i + 1].text_content : '',
+    }
+  }
 
   const { data: pending } = await db.from('elements')
     .select('*').eq('episode_id', episode_id).in('status', ['missing', 'stale']).order('idx')
@@ -70,12 +85,15 @@ export default async function handler(req: Request) {
               stability: ch.stability,
               similarity: ch.similarity,
               style: ch.style,
+              speed: ch.speed ?? 1,
+              seed: ch.seed,
+              ...neighbours(el.idx),
             })
           } else {
             const built = buildSoundPrompt(el.text_content, el.duration_ms)
             const stored = (el.prompt ?? '').trim()
             prompt = stored && !looksLikeRawCue(stored, el.text_content) ? stored : built.prompt
-            audio = await makeSound(prompt, built.seconds)
+            audio = await makeSound(prompt, built.seconds, influence, built.isAmbience)
           }
           await storeTake(db, userId, projectId, el.id, audio, prompt, 'elevenlabs')
           done++

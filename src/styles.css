@@ -1332,3 +1332,72 @@ select.inline:hover { border-color: var(--text-3); }
   border-radius: var(--r-sm); padding: 9px 10px; margin: 7px 0 5px;
   white-space: pre-wrap; word-break: break-word; color: var(--text-2);
 }
+
+.pace-row {
+  display: grid; grid-template-columns: 1fr 92px 56px;
+  gap: 9px; align-items: center;
+  font-size: var(--t-xs); color: var(--text-2);
+}
+.pace-row .tnum { font-family: var(--mono); color: var(--text-3); text-align: right; }
+.pace-row input[type='range'] {
+  appearance: none; height: 3px; background: var(--paper-2); border-radius: 99px; cursor: pointer;
+}
+.pace-row input[type='range']::-webkit-slider-thumb {
+  appearance: none; width: 11px; height: 11px; border-radius: 50%;
+  background: var(--blue); border: 0;
+}
+.pace-row input[type='range']::-moz-range-thumb {
+  width: 11px; height: 11px; border-radius: 50%; background: var(--blue); border: 0;
+}
+
+.ip-text { cursor: text; border-radius: var(--r-sm); transition: background .12s var(--ease); }
+.ip-text:hover { background: var(--paper-1); box-shadow: 0 0 0 6px var(--paper-1); }
+
+.line-actions {
+  display: flex; gap: 8px; align-items: center;
+  border-top: 1px solid var(--rule-soft); padding-top: 12px;
+}
+
+/* ================= trim editor ================= */
+
+.trim-wrap {
+  border: 1px solid var(--rule); border-radius: var(--r-sm);
+  background: var(--paper-1); overflow: hidden;
+  cursor: crosshair; touch-action: none; user-select: none;
+}
+.trim-canvas { display: block; width: 100%; }
+
+.trim-bar { display: flex; align-items: center; gap: 10px; }
+.trim-bar .play { background: var(--blue); color: #fff; box-shadow: none; }
+.trim-bar .play:hover { background: var(--blue-hi); }
+.trim-bar .tp-btn { color: var(--text-3); }
+.trim-bar .tp-btn:hover { background: var(--paper-1); color: var(--text); }
+.trim-time {
+  font-family: var(--mono); font-size: var(--t-sm); color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.trim-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: var(--t-xs); color: var(--text-2);
+}
+
+.trim-fields { display: grid; grid-template-columns: 1fr 1fr 1.4fr; gap: 12px; }
+.trim-fields input { font-variant-numeric: tabular-nums; }
+
+.tl-clip { cursor: grab; }
+.tl-clip:active { cursor: grabbing; }
+
+.undo-pair { display: flex; gap: 2px; }
+.undo-pair .btn { padding: 6px 10px; }
+
+.clip-fade {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 10px; color: #71818f;
+}
+.clip-fade input {
+  width: 52px; background: var(--ink-1); color: var(--ink-text-hi);
+  border: 1px solid var(--ink-line); border-radius: 5px;
+  padding: 3px 5px; font-size: 10px; font-variant-numeric: tabular-nums;
+}
+.clip-fade input:focus { outline: none; border-color: #5ea3dd; }

@@ -13,7 +13,7 @@ export default async function handler(req: Request) {
   const db = admin()
 
   const { data: el } = await db.from('elements')
-    .select('*, episodes!inner(project_id, projects!inner(owner, style_notes, language_code))')
+    .select('*, episodes!inner(id, project_id, projects!inner(owner, style_notes, language_code, prompt_influence, context_lines))')
     .eq('id', element_id).single()
 
   // @ts-expect-error nested select shape
@@ -21,7 +21,10 @@ export default async function handler(req: Request) {
   // @ts-expect-error nested select shape
   const projectId = el.episodes.project_id as string
   // @ts-expect-error nested select shape
-  const languageCode = (el.episodes.projects.language_code ?? 'es') as string
+  const project = el.episodes.projects as {
+    language_code?: string; prompt_influence?: number; context_lines?: boolean
+  }
+  const languageCode = project.language_code ?? 'es'
 
   try {
     let audio: ArrayBuffer
@@ -34,6 +37,25 @@ export default async function handler(req: Request) {
       // The stage direction becomes audio tags and pauses before the words are sent.
       const tone = effectiveDirection(el.direction, ch.direction_notes, ch.description)
       const directed = applyDirection(el.text_content, tone.text)
+
+      /*
+       * The neighbours. Without them every line is generated from a standing start and
+       * lands in the same neutral place, which is what makes an episode sound like takes
+       * in a row rather than people talking.
+       */
+      let previousText = ''
+      let nextText = ''
+      if (project.context_lines !== false) {
+        const { data: around } = await db.from('elements')
+          .select('idx, kind, text_content')
+          .eq('episode_id', el.episode_id)
+          .eq('kind', 'dialogue')
+          .order('idx')
+        const list = (around ?? []) as { idx: number; text_content: string }[]
+        const here = list.findIndex(x => x.idx === el.idx)
+        if (here > 0) previousText = list[here - 1].text_content
+        if (here >= 0 && here < list.length - 1) nextText = list[here + 1].text_content
+      }
       promptUsed = directed.text
       provider = 'elevenlabs'
       audio = await speak({
@@ -44,6 +66,10 @@ export default async function handler(req: Request) {
         stability: ch.stability,
         similarity: ch.similarity,
         style: ch.style,
+        speed: ch.speed ?? 1,
+        seed: ch.seed,
+        previousText,
+        nextText,
       })
     } else {
       /*
@@ -55,7 +81,12 @@ export default async function handler(req: Request) {
       const stored = el.prompt?.trim() ?? ''
       promptUsed = stored && !looksLikeRawCue(stored, el.text_content) ? stored : built.prompt
       provider = 'elevenlabs'
-      audio = await makeSound(promptUsed, built.seconds)
+      audio = await makeSound(
+        promptUsed,
+        built.seconds,
+        project.prompt_influence ?? 0.4,
+        built.isAmbience,
+      )
     }
 
     const take = await storeTake(db, userId, projectId, element_id, audio, promptUsed, provider)

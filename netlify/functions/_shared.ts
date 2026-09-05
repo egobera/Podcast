@@ -83,6 +83,18 @@ export async function speak(opts: {
   stability: number
   similarity: number
   style: number
+  speed?: number
+  seed?: number | null
+  /**
+   * The lines either side of this one.
+   *
+   * Generated in isolation, every line lands in the same neutral place and the result
+   * sounds like recordings played in order rather than a conversation. Given the line
+   * before and after, the model carries intonation across the join: a question keeps its
+   * lift, an answer starts where the question left off.
+   */
+  previousText?: string
+  nextText?: string
 }): Promise<ArrayBuffer> {
   const res = await fetch(
     `${ELEVEN}/text-to-speech/${opts.voiceId}?output_format=mp3_44100_128`,
@@ -93,10 +105,14 @@ export async function speak(opts: {
         text: opts.text,
         model_id: opts.modelId,
         language_code: opts.languageCode,
+        previous_text: opts.previousText || undefined,
+        next_text: opts.nextText || undefined,
+        seed: opts.seed ?? undefined,
         voice_settings: {
           stability: opts.stability,
           similarity_boost: opts.similarity,
           style: opts.style,
+          speed: opts.speed ?? 1,
           use_speaker_boost: true,
         },
       }),
@@ -107,14 +123,20 @@ export async function speak(opts: {
 }
 
 /** Sound effects, same account, same key. */
-export async function makeSound(prompt: string, seconds: number): Promise<ArrayBuffer> {
+export async function makeSound(
+  prompt: string,
+  seconds: number,
+  influence = 0.4,
+  loop = false,
+): Promise<ArrayBuffer> {
   const res = await fetch(`${ELEVEN}/sound-generation?output_format=mp3_44100_128`, {
     method: 'POST',
     headers: { 'xi-api-key': key(), 'Content-Type': 'application/json' },
     body: JSON.stringify({
       text: prompt,
       duration_seconds: Math.min(Math.max(seconds, 0.5), 22),
-      prompt_influence: 0.4,
+      prompt_influence: Math.min(Math.max(influence, 0), 1),
+      loop,
     }),
   })
   if (!res.ok) await elevenError(res, 'generate a sound')
