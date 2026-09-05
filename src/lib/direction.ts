@@ -52,7 +52,16 @@ export interface Directed {
   tags: string[]
 }
 
-export function applyDirection(line: string, direction: string): Directed {
+/**
+ * Only v3 understands audio tags. The older models have no idea what `[excited]` is, so
+ * they say it out loud: "excited, cuatro, cinco, seis charcos". The pauses still work
+ * everywhere, so a slow direction keeps doing its job on any model.
+ */
+export function supportsTags(modelId: string): boolean {
+  return /v3/i.test(modelId)
+}
+
+export function applyDirection(line: string, direction: string, useTags = true): Directed {
   if (!direction?.trim()) return { text: line, tags: [] }
 
   const tags: string[] = []
@@ -62,7 +71,7 @@ export function applyDirection(line: string, direction: string): Directed {
   }
 
   let text = line
-  if (tags.length) text = `${tags.join(' ')} ${text}`
+  if (useTags && tags.length) text = `${tags.join(' ')} ${text}`
 
   // A slow direction gets breaks at the sentence joins, where an actor would breathe.
   for (const [re, ms] of PACE) {
@@ -74,7 +83,7 @@ export function applyDirection(line: string, direction: string): Directed {
     break
   }
 
-  return { text, tags }
+  return { text, tags: useTags ? tags : [] }
 }
 
 /** The chips offered in the inspector, in the language the scripts are written in. */

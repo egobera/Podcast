@@ -4,7 +4,7 @@ import { runChecks } from './ExportPanel'
 import { Play as PlayIcon, Pause as PauseIcon, Upload, Check } from './icons'
 import { usePreview } from '../lib/usePreview'
 import Comments from './Comments'
-import { applyDirection, effectiveDirection, DIRECTION_HINTS } from '../lib/direction'
+import { applyDirection, effectiveDirection, supportsTags, DIRECTION_HINTS } from '../lib/direction'
 import { buildSoundPrompt } from '../lib/soundprompt'
 import { pacingFor, DEFAULT_PACING, type Pacing } from '../lib/pacing'
 import type { AudioElement, Character, Comment, Episode, SeriesAsset, SeriesBlock, Take } from '../lib/types'
@@ -443,7 +443,8 @@ function DirectionField({
   const [text, setText] = useState(value)
 
   const tone = effectiveDirection(text, character?.direction_notes, character?.description)
-  const out = applyDirection(line, tone.text)
+  const tagsWork = supportsTags(character?.model ?? 'eleven_v3')
+  const out = applyDirection(line, tone.text, tagsWork)
 
   const add = (hint: string) => {
     const next = text.trim() ? `${text.trim()}, ${hint}` : hint
@@ -475,6 +476,13 @@ function DirectionField({
             : 'Tone written on this line.'}
         </span>
       </details>
+
+      {!tagsWork && (
+        <span className="hint">
+          {character?.name} is on a model that does not read emotion tags, so only the pauses from
+          this direction are used. Switch them to v3 if the feeling matters more than the flow.
+        </span>
+      )}
 
       <span className="hint">
         {out.tags.length > 0

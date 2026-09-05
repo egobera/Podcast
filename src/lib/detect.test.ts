@@ -3,7 +3,7 @@ import { normalize, isTimingOnly, detectRepeats, detectPairs, cueKeyword, countU
 
 import { safeName } from './files'
 import { expectedMsFrom, lengthMismatch } from './duration'
-import { applyDirection, effectiveDirection } from './direction'
+import { applyDirection, effectiveDirection, supportsTags } from './direction'
 import { buildSoundPrompt, defaultLengthMs, looksLikeRawCue } from './soundprompt'
 
 const cue = (id: string, idx: number, text: string, episode_id = 'ep1') =>
@@ -354,5 +354,26 @@ describe('effectiveDirection', () => {
     const out = effectiveDirection('', '', '')
     expect(out.text).toBe('')
     expect(out.fromCharacter).toBe(false)
+  })
+})
+
+describe('audio tags by model', () => {
+  it('only v3 gets them', () => {
+    expect(supportsTags('eleven_v3')).toBe(true)
+    expect(supportsTags('eleven_multilingual_v2')).toBe(false)
+    expect(supportsTags('eleven_turbo_v2_5')).toBe(false)
+  })
+
+  it('leaves the tag out for a model that would read it aloud', () => {
+    // v2 has no idea what [excited] is, so it says it: "excited, cuatro, cinco, seis".
+    const out = applyDirection('Cuatro. Cinco. Seis charcos.', 'emocionada', false)
+    expect(out.text).toBe('Cuatro. Cinco. Seis charcos.')
+    expect(out.tags).toEqual([])
+  })
+
+  it('keeps the pauses on every model, because those always work', () => {
+    const out = applyDirection('Diez. Nueve. Ocho.', 'muy despacio', false)
+    expect(out.text).toContain('<break')
+    expect(out.text).not.toContain('[')
   })
 })

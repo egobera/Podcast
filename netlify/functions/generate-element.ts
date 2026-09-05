@@ -1,5 +1,5 @@
 import { admin, userFrom, json, speak, makeSound, storeTake } from './_shared'
-import { applyDirection, effectiveDirection } from '../../src/lib/direction'
+import { applyDirection, effectiveDirection, supportsTags } from '../../src/lib/direction'
 import { buildSoundPrompt, looksLikeRawCue } from '../../src/lib/soundprompt'
 
 /** Generates one take for one element. Synchronous, so it must stay under 10 seconds. */
@@ -52,7 +52,7 @@ export default async function handler(req: Request) {
       if (!ch?.voice_id) return json({ error: 'This character has no voice set yet.' }, 400)
       // The stage direction becomes audio tags and pauses before the words are sent.
       const tone = effectiveDirection(el.direction, ch.direction_notes, ch.description)
-      const directed = applyDirection(el.text_content, tone.text)
+      const directed = applyDirection(el.text_content, tone.text, supportsTags(ch.model))
 
       /*
        * The neighbours. Without them every line is generated from a standing start and
