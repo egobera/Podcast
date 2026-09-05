@@ -208,10 +208,16 @@ export default function Characters({ project, onChanged }: { project: Project; o
                 <div className="field">
                   <label>Model</label>
                   <select defaultValue={c.model} onChange={e => patch(c.id, { model: e.target.value })}>
-                    <option value="eleven_v3">v3 · reads the emotion tags</option>
-                    <option value="eleven_multilingual_v2">multilingual v2 · steadier, ignores tags</option>
-                    <option value="eleven_turbo_v2_5">turbo v2.5 · fastest, least expressive</option>
+                    <option value="eleven_v3">v3 · emotion tags, no line context</option>
+                    <option value="eleven_multilingual_v2">multilingual v2 · line context, no tags</option>
+                    <option value="eleven_turbo_v2_5">turbo v2.5 · line context, fastest, flattest</option>
                   </select>
+                  <span className="hint">
+                    The two cannot be combined. v3 acts on a direction like <em>llorando</em> but
+                    generates each line in isolation. The older models carry intonation across the
+                    join, so an answer starts where the question left off, but ignore the tags.
+                    A character who mostly reacts wants v3; a narrator who mostly flows wants v2.
+                  </span>
                 </div>
 
                 <div className="field">

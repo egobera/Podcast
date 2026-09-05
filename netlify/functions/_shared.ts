@@ -75,6 +75,15 @@ async function elevenError(res: Response, what: string): Promise<never> {
  * Calling the provider directly removes a hop, a second set of credentials, and a second
  * thing that can be wrong.
  */
+/*
+ * v3 reads the emotion tags but refuses the neighbouring lines; the older models take the
+ * neighbours but ignore the tags. Sending both to v3 fails the request outright, so the
+ * choice is made here rather than left to whoever calls it.
+ */
+export function takesContext(modelId: string): boolean {
+  return !/v3/i.test(modelId)
+}
+
 export async function speak(opts: {
   voiceId: string
   text: string
@@ -105,8 +114,9 @@ export async function speak(opts: {
         text: opts.text,
         model_id: opts.modelId,
         language_code: opts.languageCode,
-        previous_text: opts.previousText || undefined,
-        next_text: opts.nextText || undefined,
+        // Only for the models that accept them. v3 rejects the whole request otherwise.
+        previous_text: takesContext(opts.modelId) ? opts.previousText || undefined : undefined,
+        next_text: takesContext(opts.modelId) ? opts.nextText || undefined : undefined,
         seed: opts.seed ?? undefined,
         voice_settings: {
           stability: opts.stability,

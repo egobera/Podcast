@@ -12,12 +12,28 @@ export default async function handler(req: Request) {
   const { element_id } = await req.json() as { element_id: string }
   const db = admin()
 
-  const { data: el } = await db.from('elements')
+  const { data: el, error: readError } = await db.from('elements')
     .select('*, episodes!inner(id, project_id, projects!inner(owner, style_notes, language_code, prompt_influence, context_lines))')
     .eq('id', element_id).single()
 
+  /*
+   * A database error is not a missing element, and reporting it as one sent people looking
+   * for a deleted line when the real answer was a column that does not exist yet. A single
+   * unrun migration made every generation in an episode fail with "Not found".
+   */
+  if (readError) {
+    const missingColumn = /column .* does not exist|schema cache/i.test(readError.message)
+    return json({
+      error: missingColumn
+        ? `The database is missing something this needs: ${readError.message}. Run the migrations in supabase/ in order.`
+        : `Could not read that line: ${readError.message}`,
+    }, missingColumn ? 500 : 400)
+  }
+
   // @ts-expect-error nested select shape
-  if (!el || el.episodes.projects.owner !== userId) return json({ error: 'Not found' }, 404)
+  if (!el || el.episodes.projects.owner !== userId) {
+    return json({ error: 'That line no longer exists, or it belongs to another account.' }, 404)
+  }
   // @ts-expect-error nested select shape
   const projectId = el.episodes.project_id as string
   // @ts-expect-error nested select shape

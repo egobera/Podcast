@@ -365,6 +365,15 @@ export default function EpisodeView({
         } catch (e) {
           failed++
           lastError = e instanceof Error ? e.message : String(e)
+
+          /*
+           * Something wrong with the setup fails identically for every line, so running
+           * the other hundred proves nothing and costs time. Three in a row with nothing
+           * working is enough to stop and say why.
+           */
+          if (done === 0 && failed >= 3) {
+            cancelRun.current = true
+          }
         }
         setRun({ done, failed, total, error: lastError })
       }
@@ -390,7 +399,12 @@ export default function EpisodeView({
     await load()
     setRun(null)
 
-    if (cancelRun.current) { toast(`Stopped. ${done} generated.`); return }
+    if (cancelRun.current) {
+      toast(done === 0 && failed > 0
+        ? `Stopped after ${failed} failures, all with the same problem: ${lastError}`
+        : `Stopped. ${done} generated.`, done === 0 ? 'bad' : undefined)
+      return
+    }
     if (failed > 0) toast(`${done} generated, ${failed} failed. ${lastError}`, 'bad')
     else toast(`${done} takes ready to review.`)
   }
@@ -1454,6 +1468,56 @@ export default function EpisodeView({
           const next = { fade_in_ms: inMs, fade_out_ms: outMs }
           await set(next)
           history.record({ label: 'fade', undo: () => set(before), redo: () => set(next) })
+        }}
+        onFitToAudio={async id => {
+          /*
+           * The clip was cut short because the timeline believed a length that no longer
+           * matched the file. A cue that says "3 seg" fixes the element at three seconds,
+           * and a six second upload after that keeps playing for three.
+           *
+           * This asks the audio how long it really is and takes that answer, clearing any
+           * trim in the way.
+           */
+          const el = elements.find(e => e.id === id)
+          if (!el) return
+
+          let path: string | null = null
+          if (el.series_asset_id) {
+            path = assets.find(a => a.id === el.series_asset_id)?.storage_path ?? null
+          } else {
+            const { data } = await supabase.from('takes').select('storage_path')
+              .eq('element_id', id).order('created_at', { ascending: false }).limit(1)
+            path = data?.[0]?.storage_path ?? null
+          }
+          if (!path) { toast('This one has no audio yet.', 'bad'); return }
+
+          const url = await signedUrl(path)
+          if (!url) { toast('Could not open the audio.', 'bad'); return }
+
+          const ctx = new AudioContext()
+          const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer())
+          const real = Math.round(buf.duration * 1000)
+          await ctx.close()
+
+          const before = {
+            duration_ms: el.duration_ms,
+            lead_silence_ms: el.lead_silence_ms ?? 0,
+            tail_silence_ms: el.tail_silence_ms ?? 0,
+            fade_out_ms: el.fade_out_ms ?? null,
+          }
+          const after = {
+            duration_ms: real,
+            lead_silence_ms: 0,
+            tail_silence_ms: 0,
+            fade_out_ms: null,
+          }
+          const set = async (v: typeof before) => {
+            await supabase.from('elements').update(v).eq('id', id)
+            setElements(list => list.map(e => (e.id === id ? { ...e, ...v } : e)))
+          }
+          await set(after)
+          history.record({ label: 'fit to the audio', undo: () => set(before), redo: () => set(after) })
+          toast(`Now ${formatMs(real)}, the full length of the file.`)
         }}
         onSplit={async (id, atMs) => {
           /*

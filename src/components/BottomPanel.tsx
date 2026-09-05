@@ -43,7 +43,7 @@ function stepFor(totalMs: number, width: number) {
 export default function BottomPanel({
   elements, total, duckDb, buildClips, selectedId, onSelect,
   episode, onLaneGain, onGain, onNudge, onTrimEdges, onTrimSelected, onSplit, onFade, onMeasured,
-  extraSelected,
+  onFitToAudio, extraSelected,
 }: {
   elements: (AudioElement & { start_ms: number })[]
   total: number
@@ -60,6 +60,7 @@ export default function BottomPanel({
   onMeasured: (m: { id: string; durationMs: number; leadMs: number; tailMs: number }[]) => void
   onTrimSelected: () => void
   onSplit: (elementId: string, atMs: number) => void
+  onFitToAudio: (elementId: string) => void
   onFade: (elementId: string, inMs: number | null, outMs: number | null) => void
 }) {
   const player = useRef<EpisodePlayer | null>(null)
@@ -217,7 +218,9 @@ export default function BottomPanel({
         ? Math.max(e.duration_ms - dragEdges.lead - dragEdges.tail, 40)
         : Math.max(e.duration_ms - (e.lead_silence_ms ?? 0) - (e.tail_silence_ms ?? 0), 40),
       url: clips.find(c => c.id === e.id)?.url,
-      ready: e.status === 'approved' || !!e.series_asset_id,
+      // Anything that has been generated has audio, approved or not. Treating only
+      // approved clips as real made a freshly generated episode look empty.
+      ready: e.status === 'approved' || e.status === 'generated' || !!e.series_asset_id,
     }))
 
   const draw = useCallback(() => {
@@ -623,6 +626,11 @@ export default function BottomPanel({
               onClick={() => onSplit(selected.id, head)}
               title="Cut this clip in two at the playhead">
               Split
+            </button>
+            <button className="btn" data-variant="quiet"
+              onClick={() => onFitToAudio(selected.id)}
+              title="Give this clip the full length of its file">
+              Fit
             </button>
             <button className="btn" data-variant="quiet" onClick={onTrimSelected}>Trim</button>
           </div>

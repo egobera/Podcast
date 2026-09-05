@@ -90,6 +90,23 @@ export default function Vault({
 
   async function patch(id: string, fields: Partial<SeriesAsset>) {
     await supabase.from('series_assets').update(fields).eq('id', id)
+
+    /*
+     * When the audio changes, every episode using it has to hear about it.
+     *
+     * An element's length is set when the script is read, from the seconds the cue states.
+     * Upload a longer file afterwards and the timeline keeps the old number, so the clip
+     * plays for three seconds of a six second file and the next line lands on top of it.
+     * That reads as the audio being cut, which is exactly what it is.
+     */
+    if (fields.duration_ms) {
+      await supabase.from('elements').update({
+        duration_ms: fields.duration_ms,
+        lead_silence_ms: 0,
+        tail_silence_ms: 0,
+      }).eq('series_asset_id', id)
+    }
+
     load(); onChanged()
   }
 
@@ -204,14 +221,15 @@ export default function Vault({
         <label className="trim-toggle" style={{ gridColumn: '1 / -1' }}>
           <input type="checkbox" defaultChecked={project.context_lines !== false}
             onChange={e => setLanguage({ context_lines: e.target.checked })} />
-          Give the model the lines before and after
+          Give the model the lines before and after, where it accepts them
         </label>
 
         <p className="notice lang-note">
           The language goes to the model so it reads numbers and abbreviations by the right rules.
           The accent is not a setting the model takes: it comes from the voices you pick or record.
           Line context is what stops each line being generated from a standing start: with it, a
-          question keeps its lift and the answer begins where the question left off.
+          question keeps its lift and the answer begins where the question left off. It is ignored
+          for characters on v3, which does not accept it.
         </p>
       </div>
 
