@@ -369,9 +369,9 @@ input, textarea, select { font: inherit; color: inherit; }
   border-left: 1px solid var(--rule-soft);
   padding: 28px 28px 40px;
   display: flex; flex-direction: column; gap: 16px;
-  /* The bottom panel floats over everything, so the inspector has to stop above it or
-     its last control is unreachable. */
-  max-height: calc(100vh - 47px - 168px);
+  /* The bottom panel floats over everything and can be dragged taller, so the inspector
+     follows its real height rather than a number that was right once. */
+  max-height: calc(100vh - 47px - var(--panel-h, 168px));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-bottom: 28px;
@@ -575,7 +575,8 @@ select.inline:hover { border-color: var(--text-3); }
 .panel-grid { display: grid; grid-template-columns: 96px 1fr; padding: 8px 16px 18px; }
 
 .lane-heads { display: flex; flex-direction: column; }
-.ruler-spacer { height: 18px; }
+/* Matches the scene band plus the ruler above the lanes. */
+.ruler-spacer { height: 40px; }
 .lane-head {
   display: flex; align-items: center; gap: 5px;
   padding-right: 10px;
@@ -1617,3 +1618,223 @@ select.inline:hover { border-color: var(--text-3); }
 
 .redo-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .redo-list .btn { flex: 1 1 auto; min-width: 130px; justify-content: center; }
+
+/* ================= timeline, redrawn ================= */
+
+.scene-band {
+  position: relative; height: 20px; margin-bottom: 2px;
+  border-bottom: 1px solid var(--ink-line);
+}
+.scene-chip {
+  position: absolute; top: 0; height: 20px;
+  display: flex; align-items: center;
+  padding: 0 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  font-size: 9px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: #7f8fa0;
+  border-left: 1px solid var(--ink-line);
+}
+.scene-chip:first-child { border-left: 0; }
+
+.lane-head {
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 10px 0 8px;
+  border-bottom: 1px solid var(--ink-line);
+}
+.lane-swatch { width: 3px; height: 14px; border-radius: 99px; flex: none; }
+.lane-name {
+  font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+  color: #9fb0c2; flex: none;
+}
+.lane-count {
+  font-family: var(--mono); font-size: 9px; color: #5c6b7c;
+  margin-right: auto;
+}
+
+.hover-tip {
+  position: absolute; top: -1px; z-index: 3;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 9px; border-radius: 99px;
+  background: rgba(8, 13, 19, .93);
+  border: 1px solid var(--ink-line);
+  pointer-events: none; white-space: nowrap;
+  max-width: 320px; overflow: hidden;
+}
+.hover-time { font-family: var(--mono); font-size: 10px; color: var(--ink-text-hi); }
+.hover-label {
+  font-size: 10px; color: #8c9cae;
+  overflow: hidden; text-overflow: ellipsis;
+}
+
+/* The playhead reads over everything, including labels. */
+.playhead {
+  z-index: 4;
+  box-shadow: 0 0 0 1px rgba(11, 17, 24, .5);
+}
+
+/* ================= clip card ================= */
+
+.clip-card {
+  position: absolute; bottom: calc(100% + 10px); z-index: 20;
+  transform: translateX(-50%);
+  width: 300px; max-width: calc(100vw - 32px);
+  /* The panel can be tall, so the card must never run off the top of the window. */
+  max-height: calc(100vh - 140px); overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 11px;
+  padding: 13px 14px 15px;
+  background: rgba(14, 22, 33, .97);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--ink-line);
+  border-radius: var(--r-lg);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .5);
+  animation: card-in .16s var(--ease);
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(6px) scale(.98); }
+  to { opacity: 1; transform: translateX(-50%); }
+}
+
+/* A tail, so it is obvious which clip the card belongs to. */
+.clip-card::after {
+  content: ''; position: absolute; top: 100%; left: 50%;
+  margin-left: -6px; border: 6px solid transparent;
+  border-top-color: rgba(14, 22, 33, .97);
+}
+
+.clip-card header { display: flex; align-items: center; gap: 8px; }
+.clip-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.clip-title {
+  flex: 1; font-size: var(--t-sm); font-weight: 500; color: var(--ink-text-hi);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.clip-card header .icon-btn { color: #71818f; }
+
+.clip-meta {
+  display: flex; gap: 14px;
+  font-family: var(--mono); font-size: 10px; color: #6d7d8e;
+}
+
+.clip-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.clip-row .btn {
+  background: none; border-color: var(--ink-line); color: #9fb0c2;
+  box-shadow: none; padding: 5px 9px; font-size: var(--t-xs);
+}
+.clip-row .btn:hover:not(:disabled) { background: var(--ink-1); color: var(--ink-text-hi); }
+
+.clip-play {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: var(--r-sm);
+  background: var(--blue); color: #fff; border: 1px solid var(--blue);
+  font-size: var(--t-xs); font-weight: 500;
+}
+.clip-play:hover { background: var(--blue-hi); }
+
+.clip-slider {
+  display: grid; grid-template-columns: 48px 1fr 54px;
+  align-items: center; gap: 9px;
+  font-size: var(--t-xs); color: #8c9cae;
+}
+.clip-slider .tnum { font-family: var(--mono); font-size: 10px; text-align: right; color: #9fb0c2; }
+.clip-slider input[type='range'] {
+  appearance: none; height: 3px; background: var(--ink-2); border-radius: 99px; cursor: pointer;
+}
+.clip-slider input[type='range']::-webkit-slider-thumb {
+  appearance: none; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--ink-text-hi); border: 0;
+}
+.clip-slider input[type='range']::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%; background: var(--ink-text-hi); border: 0;
+}
+
+.clip-fades {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 9px;
+  padding-top: 10px; border-top: 1px solid var(--ink-line);
+}
+.clip-fades label { display: flex; flex-direction: column; gap: 4px; font-size: var(--t-xs); color: #8c9cae; }
+.clip-fades input {
+  background: var(--ink-1); color: var(--ink-text-hi);
+  border: 1px solid var(--ink-line); border-radius: var(--r-sm);
+  padding: 5px 8px; font-size: var(--t-xs); font-variant-numeric: tabular-nums;
+}
+.clip-fades input:focus { outline: none; border-color: #5ea3dd; }
+.clip-fades .hint { grid-column: 1 / -1; color: #5c6b7c; }
+
+.hover-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.hover-len { font-family: var(--mono); font-size: 10px; color: #5c6b7c; }
+
+/* ================= guidance ================= */
+
+.guide {
+  border: 1px solid var(--rule-soft); border-radius: var(--r-lg);
+  background: var(--paper); padding: 20px 22px;
+  display: flex; flex-direction: column; gap: 10px;
+  max-width: 560px; margin-bottom: 30px;
+  box-shadow: var(--lift-1);
+}
+.guide h3 {
+  font-family: var(--serif); font-weight: 500; font-size: var(--t-xl);
+  margin: 0; letter-spacing: -0.01em;
+}
+.guide p { margin: 0; font-size: var(--t-sm); color: var(--text-2); line-height: 1.6; max-width: 52ch; }
+.guide .btn { align-self: flex-start; margin-top: 2px; }
+
+.guide-top { display: flex; align-items: center; gap: 12px; }
+.guide-count { font-family: var(--mono); font-size: var(--t-xs); color: var(--text-3); flex: none; }
+.guide-bar { flex: 1; height: 3px; background: var(--paper-2); border-radius: 99px; overflow: hidden; }
+.guide-bar span {
+  display: block; height: 100%; background: var(--blue); border-radius: 99px;
+  transition: width .35s var(--ease);
+}
+
+.guide details { margin-top: 6px; border-top: 1px solid var(--rule-soft); padding-top: 10px; }
+.guide summary {
+  cursor: pointer; font-size: var(--t-xs); color: var(--text-3);
+  list-style: none; padding-bottom: 4px;
+}
+.guide summary::-webkit-details-marker { display: none; }
+.guide summary::before { content: '▸ '; }
+.guide details[open] summary::before { content: '▾ '; }
+
+/* ================= keys ================= */
+
+.keys-hint {
+  position: fixed; right: 18px; bottom: 18px; z-index: 30;
+  width: 32px; height: 32px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--paper); border: 1px solid var(--rule);
+  box-shadow: var(--lift-1); color: var(--text-3);
+  transition: color .12s var(--ease), border-color .12s var(--ease), transform .1s var(--ease);
+}
+.keys-hint:hover { color: var(--text); border-color: var(--text-3); transform: translateY(-1px); }
+.keys-hint .key { border: 0; background: none; box-shadow: none; padding: 0; }
+
+.keys-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px 26px; }
+.keys-grid section { display: flex; flex-direction: column; gap: 5px; }
+.key-row {
+  display: grid; grid-template-columns: 78px 1fr; gap: 10px; align-items: baseline;
+  font-size: var(--t-xs); color: var(--text-2);
+}
+.key-row .key { justify-self: start; }
+
+@media (max-width: 700px) { .keys-grid { grid-template-columns: 1fr; } }
+
+/* A visible focus ring everywhere, because a keyboard-first tool has to be usable
+   without a pointer at all. */
+:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 3px; }
+.panel :focus-visible, .clip-card :focus-visible { outline-color: #5ea3dd; }
+
+/* The one action somebody reaches for when a line was added by mistake belongs near the
+   line, not at the end of a long panel. */
+.ip-remove {
+  align-self: flex-start; padding-left: 0; margin-top: -4px;
+  font-size: var(--t-xs);
+}
+.ip-remove:hover { padding-left: 10px; }
+
+/* The panel always ends with room to spare, so nothing sits against the edge. */
+.inspector { padding-bottom: 40px; }
+
+/* The library shows what a kept thing is without letting it be edited here. */
+.card-desc-static {
+  margin: 0; font-size: var(--t-sm); color: var(--text-2); line-height: 1.5;
+}

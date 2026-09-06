@@ -1,5 +1,5 @@
 /**
- * Everything Estudio deliberately does not do appears here, in place, with the
+ * Everything Canon deliberately does not do appears here, in place, with the
  * procedure to do it by hand. A limitation the user can act on is documentation.
  */
 
@@ -13,7 +13,7 @@ export type ManualTopic =
 const TOPICS: Record<ManualTopic, { title: string; why: string; steps: string[] }> = {
   'reverse-reverb': {
     title: 'Reverse reverb is made by hand',
-    why: 'A swell that grows into a hit instead of decaying after it. Estudio places audio, it does not process it. This takes about two minutes in Audacity, which is free.',
+    why: 'A swell that grows into a hit instead of decaying after it. Canon places audio, it does not process it. This takes about two minutes in Audacity, which is free.',
     steps: [
       'Open the acid freeze clip in Audacity.',
       'Add 5 seconds of silence at the end. Skip this and the tail gets cut and nothing happens.',
@@ -36,17 +36,17 @@ const TOPICS: Record<ManualTopic, { title: string; why: string; steps: string[] 
   },
   'fine-edit': {
     title: 'Millisecond editing happens in a DAW',
-    why: 'Aligning the peak of a swell to the exact frame of a cut is work done by ear. Estudio arranges, it does not carve.',
+    why: 'Aligning the peak of a swell to the exact frame of a cut is work done by ear. Canon arranges, it does not carve.',
     steps: [
       'Export the episode as a DAW project from the export panel.',
       'Open it in Reaper, Audacity or your editor of choice.',
       'Every clip arrives on its own track at the position set here.',
-      'Do the fine work there. Nothing needs to come back into Estudio.',
+      'Do the fine work there. Nothing needs to come back into Canon.',
     ],
   },
   mastering: {
     title: 'Final loudness is set on export',
-    why: 'Estudio normalizes the mix to the project target. Anything beyond that, compression, EQ, de-essing, belongs in a DAW.',
+    why: 'Canon normalizes the mix to the project target. Anything beyond that, compression, EQ, de-essing, belongs in a DAW.',
     steps: [
       'Check the target in project settings. The default is -16 LUFS, the Spotify and Apple reference.',
       'Avoid heavy compression on this material. It lives on dynamic range.',

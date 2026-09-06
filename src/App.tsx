@@ -7,14 +7,16 @@ import Characters from './components/Characters'
 import EpisodeView from './components/EpisodeView'
 import Library from './components/Library'
 import TeamView from './components/TeamView'
+import LibraryPanel from './components/LibraryPanel'
 import { AskText, ToastHost, useToast } from './components/ui'
 import ErrorBoundary, { SetupNeeded } from './components/ErrorBoundary'
 import MobileTabs, { InstallPrompt, type Tab } from './components/MobileTabs'
+import Shortcuts, { useShortcutsOverlay } from './components/Shortcuts'
 import { usePhone } from './lib/useMedia'
 import { isStandalone } from './lib/pwa'
 import type { Character, Episode, Project, SeriesAsset, Team, TeamMember } from './lib/types'
 
-type View = { kind: 'library' } | { kind: 'team' } | { kind: 'vault' } | { kind: 'characters' } | { kind: 'episode'; id: string }
+type View = { kind: 'library' } | { kind: 'team' } | { kind: 'kept' } | { kind: 'vault' } | { kind: 'characters' } | { kind: 'episode'; id: string }
 type Ask = null | 'series' | 'rename' | 'episode'
 
 export default function App() {
@@ -43,6 +45,7 @@ function Workspace() {
   const [view, setView] = useState<View>({ kind: 'library' })
   const [ask, setAsk] = useState<Ask>(null)
   const phone = usePhone()
+  const keys = useShortcutsOverlay()
   const [setupError, setSetupError] = useState('')
   const toast = useToast()
 
@@ -162,15 +165,57 @@ function Workspace() {
       : `${title} created. Paste the script to see what it needs.`)
   }
 
+  /*
+   * The order of the work, in the order it has to happen.
+   *
+   * These used to be four unrelated boxes. They are a sequence: a script cannot be read
+   * before an episode exists, voices cannot be assigned before a script names anybody, and
+   * generating before either produces silence. Saying so, and pointing at exactly the next
+   * thing, is the difference between a tool somebody learns and a tool somebody guesses at.
+   */
   const steps = useMemo(() => {
-    void 0
-    const themed = assets.some(a => a.auto_place === 'open' && a.storage_path)
-    const voiced = chars.some(c => c.voice_id)
+    const themed = assets.some(a => (a.auto_place === 'open' || a.auto_place === 'close') && a.storage_path)
+    const voiced = chars.filter(c => c.voice_id).length
+    const named = chars.length
+
     return [
-      { done: !!project && project.name !== 'Untitled series', text: 'Name the series', go: () => setAsk('rename') },
-      { done: themed, text: 'Put the opening theme in the vault', go: () => setView({ kind: 'vault' }) },
-      { done: episodes.length > 0, text: 'Create the first episode', go: () => setAsk('episode') },
-      { done: voiced, text: 'Give a character a voice', go: () => setView({ kind: 'characters' }) },
+      {
+        done: !!project && project.name !== 'Untitled series',
+        text: 'Name the series',
+        why: 'It shows on every episode and in the feed later.',
+        go: () => setAsk('rename'),
+        cta: 'Name it',
+      },
+      {
+        done: episodes.length > 0,
+        text: 'Create the first episode',
+        why: 'Everything else hangs off an episode: the script, the cast, the timeline.',
+        go: () => setAsk('episode'),
+        cta: 'Create one',
+      },
+      {
+        done: named > 0,
+        text: 'Read a script into it',
+        why: 'The script is what tells the app who speaks, what sounds are needed and how long it runs.',
+        go: () => setView({ kind: 'library' }),
+        cta: 'Open the episode',
+      },
+      {
+        done: named > 0 && voiced === named,
+        text: voiced === 0
+          ? 'Give the characters a voice'
+          : `Give the remaining ${named - voiced} characters a voice`,
+        why: 'A character without one generates nothing at all, and the run fails on every one of their lines.',
+        go: () => setView({ kind: 'characters' }),
+        cta: 'Open the cast',
+      },
+      {
+        done: themed,
+        text: 'Put the themes in the vault',
+        why: 'Music is uploaded, not generated. Without them an episode starts and ends in silence.',
+        go: () => setView({ kind: 'vault' }),
+        cta: 'Open the vault',
+      },
     ]
   }, [project, assets, chars, episodes])
 
@@ -203,7 +248,7 @@ function Workspace() {
     <div className="shell" data-phone={phone} data-standalone={isStandalone()}>
       <nav className="rail">
         <div className="rail-brand">
-          <h1>{project ? project.name : team?.name ?? 'Estudio'}</h1>
+          <h1>{project ? project.name : team?.name ?? 'Canon'}</h1>
         </div>
 
         {teams.length > 1 && (
@@ -217,6 +262,9 @@ function Workspace() {
           <button data-active={view.kind === 'library'} onClick={() => setView({ kind: 'library' })}>
             All series
             <span className="rail-count">{projects.length}</span>
+          </button>
+          <button data-active={view.kind === 'kept'} onClick={() => setView({ kind: 'kept' })}>
+            Library
           </button>
           <button data-active={view.kind === 'team'} onClick={() => setView({ kind: 'team' })}>
             Team
@@ -254,6 +302,15 @@ function Workspace() {
       </nav>
 
       <main className="main">
+        {view.kind === 'kept' && teamId && (
+          <LibraryPanel
+            teamId={teamId}
+            project={project}
+            userId={userId}
+            onChanged={loadSeries}
+          />
+        )}
+
         {view.kind === 'team' && team && (
           <TeamView team={team} userId={userId} onChanged={() => { loadTeams(); loadProjects() }} />
         )}
@@ -268,25 +325,54 @@ function Workspace() {
           />
         )}
 
-        {project && !setupDone && view.kind === 'vault' && (
-          <div className="page" style={{ paddingBottom: 0 }}>
-            <div className="start">
-              <h3>Start here</h3>
-              {steps.map(s => (
-                <div className="step" data-done={s.done} key={s.text}>
-                  <span className="step-mark">{s.done ? '●' : '○'}</span>
-                  <span className="step-text">{s.text}</span>
-                  {!s.done && <button className="btn" data-variant="quiet" onClick={s.go}>Go</button>}
+        {project && !setupDone && view.kind !== 'episode' && (() => {
+          /*
+           * The one thing to do next, everywhere except inside an episode.
+           *
+           * A checklist tucked into one screen only helps somebody who already found that
+           * screen. This follows you, names the next step, says why it matters, and offers
+           * the single button that does it. The rest of the list is there for anyone who
+           * wants to see the shape of the work, folded away for everyone else.
+           */
+          const next = steps.find(st => !st.done)!
+          const done = steps.filter(st => st.done).length
+
+          return (
+            <div className="page" style={{ paddingBottom: 0 }}>
+              <div className="guide">
+                <div className="guide-top">
+                  <span className="guide-count tnum">{done} of {steps.length}</span>
+                  <div className="guide-bar">
+                    <span style={{ width: `${(done / steps.length) * 100}%` }} />
+                  </div>
                 </div>
-              ))}
+
+                <h3>{next.text}</h3>
+                <p>{next.why}</p>
+                <button className="btn" data-variant="primary" onClick={next.go}>{next.cta}</button>
+
+                <details>
+                  <summary>All the steps</summary>
+                  {steps.map(st => (
+                    <div className="step" data-done={st.done} key={st.text}>
+                      <span className="step-mark">{st.done ? '●' : '○'}</span>
+                      <span className="step-text">{st.text}</span>
+                      {!st.done && st !== next && (
+                        <button className="btn" data-variant="quiet" onClick={st.go}>Go</button>
+                      )}
+                    </div>
+                  ))}
+                </details>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {project && view.kind === 'vault' && (
           <Vault
             project={project}
             userId={userId}
+            teamId={teamId ?? ''}
             canDelete={myRole === 'owner'}
             onChanged={loadSeries}
             onDeleted={async () => {
@@ -296,7 +382,7 @@ function Workspace() {
             }}
           />
         )}
-        {project && view.kind === 'characters' && <Characters project={project} onChanged={loadSeries} />}
+        {project && view.kind === 'characters' && <Characters project={project} userId={userId} teamId={teamId ?? ''} onChanged={loadSeries} />}
         {project && episode && (
           <EpisodeView
             key={episode.id}

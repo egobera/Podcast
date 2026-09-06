@@ -25,7 +25,7 @@ import { tap } from '../lib/pwa'
 import MobileEpisode from './MobileEpisode'
 import { EpisodePlayer, findEdges } from '../lib/player'
 import type { Clip } from '../lib/player'
-import type { AudioElement, Character, Comment, Episode, Job, Project, SeriesAsset, SeriesBlock, Take } from '../lib/types'
+import type { AudioElement, Character, Comment, Episode, Job, Project, SceneTake, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
 const COST_PER_ELEMENT = 0.04
 
@@ -43,6 +43,7 @@ export default function EpisodeView({
   const [assets, setAssets] = useState<SeriesAsset[]>([])
   const [blocks, setBlocks] = useState<SeriesBlock[]>([])
   const [comments, setComments] = useState<Comment[]>([])
+  const [sceneTakes, setSceneTakes] = useState<SceneTake[]>([])
   const [missingThemes, setMissingThemes] = useState<{ id: string; name: string }[]>([])
   const [takes, setTakes] = useState<Record<string, Take[]>>({})
   const [selected, setSelected] = useState<string | null>(null)
@@ -75,18 +76,20 @@ export default function EpisodeView({
   const uploadTarget = useRef<string | null>(null)
 
   const load = useCallback(async () => {
-    const [{ data: els }, { data: cs }, { data: sa }, { data: bl }, { data: cm }] = await Promise.all([
+    const [{ data: els }, { data: cs }, { data: sa }, { data: bl }, { data: cm }, { data: st }] = await Promise.all([
       supabase.from('elements').select('*').eq('episode_id', episode.id).order('idx'),
       supabase.from('characters').select('*').eq('project_id', project.id),
       supabase.from('series_assets').select('*').eq('project_id', project.id),
       supabase.from('series_blocks').select('*').eq('project_id', project.id),
       supabase.from('comments').select('*').eq('episode_id', episode.id).order('created_at'),
+      supabase.from('scene_takes').select('*').eq('episode_id', episode.id).order('created_at'),
     ])
     setElements((els ?? []) as AudioElement[])
     setChars((cs ?? []) as Character[])
     setAssets((sa ?? []) as SeriesAsset[])
     setBlocks((bl ?? []) as SeriesBlock[])
     setComments((cm ?? []) as Comment[])
+    setSceneTakes((st ?? []) as SceneTake[])
     setMissingThemes(await missingTemplateAssets(episode.id, project.id))
   }, [episode.id, project.id])
 
@@ -435,6 +438,61 @@ export default function EpisodeView({
    * Nothing is deleted. The old takes stay in their element's history, so a regeneration
    * that turns out worse can be walked back by picking the previous take.
    */
+  /**
+   * Perform a whole scene at once.
+   *
+   * The lines keep their identity, their direction and their place in the script; what
+   * changes is that one file now covers all of them. So the timeline treats the first line
+   * of the scene as the clip and the rest as passengers, which is also why redoing one of
+   * them means redoing the scene.
+   */
+  async function generateScene(scene: string) {
+    preview.stop()
+    setBusyId(`scene:${scene}`)
+    try {
+      const out = await callFunction<{ take_id: string; lines: number }>('generate-scene', {
+        episode_id: episode.id,
+        scene,
+        seed: episode.pacing?.sceneSeed,
+      })
+
+      // The server cannot decode audio, so the length is measured here.
+      const { data: take } = await supabase.from('scene_takes')
+        .select('*').eq('id', out.take_id).single()
+      if (take) {
+        const url = await signedUrl((take as SceneTake).storage_path)
+        if (url) {
+          const ctx = new AudioContext()
+          const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer())
+          await ctx.close()
+          const ms = Math.round(buf.duration * 1000)
+          await supabase.from('scene_takes').update({ duration_ms: ms }).eq('id', out.take_id)
+
+          /*
+           * The whole performance hangs off the first line. The rest keep their text and
+           * their place so the script still reads, but contribute no time of their own.
+           */
+          const inScene = (take as SceneTake).element_ids
+          await supabase.from('elements')
+            .update({ duration_ms: ms, lead_silence_ms: 0, tail_silence_ms: 0 })
+            .eq('id', inScene[0])
+          if (inScene.length > 1) {
+            await supabase.from('elements')
+              .update({ duration_ms: 0, lead_silence_ms: 0, tail_silence_ms: 0 })
+              .in('id', inScene.slice(1))
+          }
+        }
+      }
+
+      await load()
+      toast(`${out.lines} lines performed together. Listen before you keep it.`)
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'The scene could not be generated', 'bad')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function redoDialogue(characterId: string | null) {
     const lines = elements.filter(e =>
       e.kind === 'dialogue'
@@ -451,6 +509,7 @@ export default function EpisodeView({
       approved_take_id: null,
       lead_silence_ms: 0,
       tail_silence_ms: 0,
+      measured: false,
     }).in('id', lines.map(l => l.id))
 
     await load()
@@ -474,13 +533,18 @@ export default function EpisodeView({
         try {
           const buf = await ctx.decodeAudioData(await (await fetch(clip.url)).arrayBuffer())
           const real = Math.round(buf.duration * 1000)
-          if (Math.abs(el.duration_ms - real) <= 120) continue
+          if (Math.abs(el.duration_ms - real) <= 120) {
+            // Already right, but now it is on the record, so it stops being asked about.
+            await supabase.from('elements').update({ measured: true }).eq('id', el.id)
+            continue
+          }
 
           const edges = findEdges(buf)
           await supabase.from('elements').update({
             duration_ms: real,
             lead_silence_ms: Math.round(edges.lead * 1000),
             tail_silence_ms: Math.round(edges.tail * 1000),
+            measured: true,
           }).eq('id', el.id)
           fixed++
         } catch { /* one unreadable file should not stop the rest */ }
@@ -575,6 +639,7 @@ export default function EpisodeView({
       duration_ms: take.duration_ms || el.duration_ms,
       lead_silence_ms: lead,
       tail_silence_ms: tail,
+      measured: true,
       source_hash: hash(el.text_content),
     }).eq('id', el.id)
     await load()
@@ -666,8 +731,13 @@ export default function EpisodeView({
       if (!newestByElement.has(t.element_id)) newestByElement.set(t.element_id, t.storage_path)
     }
 
+    /* A line inside a scene performance is silent on its own: the scene take covers it. */
+    const sceneAudio = new Map(sceneTakes.map(t => [t.element_ids[0], t]))
+    const passengers = new Set(sceneTakes.flatMap(t => t.element_ids.slice(1)))
+
     const withAudio = candidates.filter(e =>
-      e.series_asset_id || e.approved_take_id || newestByElement.has(e.id))
+      !passengers.has(e.id)
+      && (sceneAudio.has(e.id) || e.series_asset_id || e.approved_take_id || newestByElement.has(e.id)))
 
     if (withAudio.length === 0) {
       toast('Nothing to play yet. Generate a take or add audio from the vault.')
@@ -677,11 +747,12 @@ export default function EpisodeView({
 
     const clips: Clip[] = []
     for (const el of withAudio) {
-      const path = el.series_asset_id
+      const scenePath = sceneAudio.get(el.id)?.storage_path
+      const path = scenePath ?? (el.series_asset_id
         ? assets.find(a => a.id === el.series_asset_id)?.storage_path
         : el.approved_take_id
           ? takePath.get(el.approved_take_id)
-          : newestByElement.get(el.id)
+          : newestByElement.get(el.id))
       if (!path) continue
       const url = await signedUrl(path)
       if (!url) continue
@@ -723,7 +794,7 @@ export default function EpisodeView({
     }
 
     return clips
-  }, [assets, toast])
+  }, [assets, toast, sceneTakes])
 
   const starts = useMemo(() => layout(elements, pacingFor(episode)), [elements, episode])
   const positioned = useMemo(
@@ -742,12 +813,18 @@ export default function EpisodeView({
     todo: allRows.filter(e => e.status === 'missing' || e.status === 'stale').length,
     review: allRows.filter(e => e.status === 'generated').length,
     done: allRows.filter(e => e.status === 'approved').length,
-    // Has audio, nobody has shaped it by hand, and its length was never measured.
+    /*
+     * Has audio, nobody has shaped it by hand, and it has never been measured.
+     *
+     * This used to ask whether the edges had any silence, which is not the same question:
+     * a trimmed file or a bed has none, so it measured fine and went on counting as
+     * pending forever.
+     */
     mismatched: allRows.filter(e =>
       e.kind !== 'pause'
       && (e.status === 'approved' || e.status === 'generated' || e.series_asset_id)
       && (e.offset_ms ?? 0) === 0 && e.fade_in_ms === null && e.fade_out_ms === null
-      && !e.lead_silence_ms && !e.tail_silence_ms).length,
+      && !e.measured).length,
   }
   const visible = allRows.filter(e =>
     filter === 'all' ? true
@@ -838,7 +915,7 @@ export default function EpisodeView({
       <div className="page">
         <h2>{episode.title}</h2>
         <p className="lede">
-          Paste the script and Estudio turns it into a list of everything this episode needs.
+          Paste the script and Canon turns it into a list of everything this episode needs.
           Character lines look like <code>NAME: text</code>. Sound cues go in parentheses on their own line.
           {elements.length > 0 && ' The themes from your vault are already in place.'}
         </p>
@@ -1154,6 +1231,24 @@ export default function EpisodeView({
         }}
         onPlayElement={() => selectedEl && play(selectedEl)}
         onAddBlock={id => selectedEl && addBlockAround(selectedEl, id)}
+        sceneLines={selectedEl
+          ? elements.filter(e => e.scene === selectedEl.scene && e.kind === 'dialogue').length
+          : 0}
+        sceneTake={selectedEl
+          ? sceneTakes.find(t => t.element_ids.includes(selectedEl.id)) ?? null
+          : null}
+        onGenerateScene={() => selectedEl && generateScene(selectedEl.scene)}
+        onDropSceneTake={async () => {
+          if (!selectedEl) return
+          const take = sceneTakes.find(t => t.element_ids.includes(selectedEl.id))
+          if (!take) return
+          await supabase.from('elements')
+            .update({ scene_take_id: null, status: 'missing', duration_ms: 2000 })
+            .in('id', take.element_ids)
+          await supabase.from('scene_takes').delete().eq('id', take.id)
+          await load()
+          toast('Back to one take per line.')
+        }}
         onStopAudio={() => preview.stop()}
         onRemoveBlock={async id => { await removeBlock(id); await load() }}
         onAddVault={id => selectedEl && addVaultAsset(selectedEl, id, 'scene')}
@@ -1232,6 +1327,22 @@ export default function EpisodeView({
             },
           ]
         })()}
+        cast={chars}
+        onSetCharacter={async characterId => {
+          if (!selectedEl) return
+          const before = selectedEl.character_id
+          const set = async (v: string | null) => {
+            await supabase.from('elements').update({ character_id: v }).eq('id', selectedEl.id)
+            setElements(list => list.map(e =>
+              e.id === selectedEl.id ? { ...e, character_id: v } : e))
+          }
+          await set(characterId)
+          history.record({
+            label: 'change the speaker',
+            undo: () => set(before),
+            redo: () => set(characterId),
+          })
+        }}
         onEditText={async text => {
           if (!selectedEl) return
           const clean = text.trim()
@@ -1588,6 +1699,7 @@ export default function EpisodeView({
         selectedId={selected}
         buildClips={buildClips}
         episode={episode}
+        characters={chars}
         onLaneGain={async (lane, db) => {
           const next = { ...(episode.lane_gain ?? {}), [lane]: db }
           await supabase.from('episodes').update({ lane_gain: next }).eq('id', episode.id)
@@ -1627,7 +1739,7 @@ export default function EpisodeView({
               || el.fade_in_ms !== null || el.fade_out_ms !== null
             if (touched) return false
 
-            return Math.abs(el.duration_ms - m.durationMs) > 120
+            return !el.measured || Math.abs(el.duration_ms - m.durationMs) > 120
           })
           if (pending.length === 0) return
 
@@ -1636,6 +1748,7 @@ export default function EpisodeView({
               duration_ms: m.durationMs,
               lead_silence_ms: m.leadMs,
               tail_silence_ms: m.tailMs,
+              measured: true,
             }).eq('id', m.id)
           }
           await load()
@@ -1687,12 +1800,14 @@ export default function EpisodeView({
             lead_silence_ms: el.lead_silence_ms ?? 0,
             tail_silence_ms: el.tail_silence_ms ?? 0,
             fade_out_ms: el.fade_out_ms ?? null,
+            measured: el.measured,
           }
           const after = {
             duration_ms: real,
             lead_silence_ms: 0,
             tail_silence_ms: 0,
             fade_out_ms: null,
+            measured: true,
           }
           const set = async (v: typeof before) => {
             await supabase.from('elements').update(v).eq('id', id)

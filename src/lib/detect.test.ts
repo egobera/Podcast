@@ -377,3 +377,43 @@ describe('audio tags by model', () => {
     expect(out.text).not.toContain('[')
   })
 })
+
+describe('loudness matching', () => {
+  const tone = (amplitude: number, seconds = 1, rate = 8000) => {
+    const length = seconds * rate
+    const data = new Float32Array(length)
+    for (let i = 0; i < length; i++) data[i] = Math.sin((i / rate) * 440 * 2 * Math.PI) * amplitude
+    return {
+      getChannelData: () => data,
+      length,
+      sampleRate: rate,
+      duration: seconds,
+      numberOfChannels: 1,
+    } as unknown as AudioBuffer
+  }
+
+  it('measures a loud clip as louder than a quiet one', async () => {
+    const { loudness } = await import('./player')
+    expect(loudness(tone(0.5))).toBeGreaterThan(loudness(tone(0.1)))
+  })
+
+  it('ignores the silence at the ends', async () => {
+    // Averaging across the whole file would be dragged down by the dead air, which is
+    // exactly what makes two takes of the same line measure differently.
+    const { loudness } = await import('./player')
+    const rate = 8000
+    const padded = new Float32Array(rate * 3)
+    for (let i = rate; i < rate * 2; i++) padded[i] = Math.sin((i / rate) * 440 * 2 * Math.PI) * 0.3
+    const buffer = {
+      getChannelData: () => padded, length: padded.length, sampleRate: rate,
+      duration: 3, numberOfChannels: 1,
+    } as unknown as AudioBuffer
+
+    expect(loudness(buffer)).toBeCloseTo(loudness(tone(0.3)), 1)
+  })
+
+  it('reports nothing for silence', async () => {
+    const { loudness } = await import('./player')
+    expect(loudness(tone(0))).toBe(0)
+  })
+})

@@ -100,7 +100,7 @@ export default function TeamView({
             </button>
           </div>
           <p className="notice">
-            Estudio does not send the invitation. The moment that person creates an account with
+            Canon does not send the invitation. The moment that person creates an account with
             this address, or signs in with it, they land straight in this team.
           </p>
         </section>

@@ -55,20 +55,20 @@ export default function MobileTabs({
 export function InstallPrompt({ ready }: { ready: boolean }) {
   const { installed, canPrompt, isIos, install } = useInstall()
   const [dismissed, setDismissed] = useState(
-    () => localStorage.getItem('estudio.installDismissed') === '1',
+    () => localStorage.getItem('canon.installDismissed') === '1',
   )
 
   if (installed || dismissed || !ready || (!canPrompt && !isIos)) return null
 
   function hide() {
     setDismissed(true)
-    localStorage.setItem('estudio.installDismissed', '1')
+    localStorage.setItem('canon.installDismissed', '1')
   }
 
   return (
     <div className="install">
       <div className="install-main">
-        <strong>Put Estudio on your home screen</strong>
+        <strong>Put Canon on your home screen</strong>
         <span>
           {isIos
             ? 'Share, then Add to Home Screen. It opens on its own, without the browser around it.'

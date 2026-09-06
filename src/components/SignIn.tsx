@@ -81,7 +81,7 @@ export default function SignIn() {
   return (
     <div className="auth-wrap">
       <div className="auth">
-        <h1>Estudio</h1>
+        <h1>Canon</h1>
         <p>
           {mode === 'in' && 'Production workspace for serialized audio fiction.'}
           {mode === 'up' && 'Create an account. One is enough for every series you make.'}

@@ -65,6 +65,32 @@ const CONCEPTS: [RegExp, string][] = [
   [/\bdomingo\b/i, 'a still sunday morning'],
   [/\btarde\b/i, 'late afternoon'],
   [/\bnoche\b/i, 'night'],
+
+  // The vocabulary a story about invented heroes actually needs.
+  [/\bpiezas?\b.*\bpl[áa]stico|pl[áa]stico.*\bpiezas?\b/i, 'a pile of small plastic bricks collapsing'],
+  [/\bpl[áa]stico\b/i, 'small plastic pieces'],
+  [/\bse encaja\b|\bencajan?\b/i, 'two plastic pieces clicking together'],
+  [/\bcama\b(?!.*tensi[óo]n|.*emocional)/i, 'someone falling backwards onto a bed'],
+  [/\bse agrieta\b|\bagriet/i, 'ice cracking across a wide surface'],
+  [/\bhielo\b/i, 'ice cracking'],
+  [/\bgota\b/i, 'a single drop falling into still water'],
+  [/\bse junta\b|\baquiet/i, 'water settling back into stillness'],
+  [/\bpoco profunda\b|\bpoco profundo\b/i, 'shallow water'],
+  [/\bse hunde\b/i, 'a foot sinking into shallow water'],
+  [/\bcorren\b|\bcorriendo\b/i, 'running footsteps'],
+  [/\bbuscando\b|\bbuscan\b/i, 'hands searching through a pile of small objects'],
+  [/\bcastillo\b/i, 'toy bricks'],
+  [/\bderrumb/i, 'a small structure collapsing'],
+
+  // The story world: water at a scale nothing domestic reaches.
+  [/\bcrujido\b/i, 'a deep groaning crack spreading through ice'],
+  [/\bagua quieta\b/i, 'a vast still body of water with a long echo'],
+  [/\benorme\b/i, 'huge and cavernous'],
+  [/\beco\b/i, 'a long echo in a large empty space'],
+  [/\bse traga\b|\btraga\b/i, 'a large mass swallowed by deep water'],
+  [/\bdeshaci[ée]ndose\b|\bdeshace\b/i, 'an immense structure of water collapsing and draining away'],
+  [/\bciudad\b/i, 'a vast open space'],
+  [/\bno termina\b|\blarugu[íi]simo\b|\blarqu[íi]simo\b|\blarqu\w*|\blarguisim/i, 'sustained and unending'],
 ]
 
 /** Ambiences want room and length; single hits want to be dry and isolated. */

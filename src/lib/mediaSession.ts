@@ -18,7 +18,7 @@ export function announce(opts: {
   navigator.mediaSession.metadata = new MediaMetadata({
     title: opts.title,
     artist: opts.series,
-    album: 'Estudio',
+    album: 'Canon',
     artwork: [
       { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
       { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },

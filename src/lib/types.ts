@@ -107,6 +107,7 @@ export interface Episode {
   target_max_ms: number
   lane_gain: Record<string, number>
   pacing: Record<string, number>
+  dialogue_scenes: string[]
 }
 
 export type Origin = 'script' | 'template' | 'block'
@@ -137,10 +138,12 @@ export interface AudioElement {
   offset_ms: number
   lead_silence_ms: number
   tail_silence_ms: number
+  measured: boolean
   fade_in_ms: number | null
   fade_out_ms: number | null
   status: ElementStatus
   approved_take_id: string | null
+  scene_take_id: string | null
 }
 
 export interface Comment {
@@ -151,6 +154,17 @@ export interface Comment {
   author_email: string | null
   body: string
   resolved: boolean
+  created_at: string
+}
+
+export interface SceneTake {
+  id: string
+  episode_id: string
+  scene: string
+  storage_path: string
+  duration_ms: number
+  element_ids: string[]
+  seed: number | null
   created_at: string
 }
 

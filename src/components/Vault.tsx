@@ -9,6 +9,7 @@ import { LANGUAGES, accentsFor } from '../lib/languages'
 import { useToast, AskText, Confirm, ConfirmTyped } from './ui'
 import { Play, Pause, Upload, Plus, Close } from './icons'
 import { usePreview } from '../lib/usePreview'
+import { saveAssetToLibrary } from '../lib/library'
 import TrimEditor from './TrimEditor'
 import ManualNote from './ManualNote'
 import Suggestions from './Suggestions'
@@ -28,10 +29,11 @@ const SUGGESTIONS = [
 ]
 
 export default function Vault({
-  project, userId, canDelete, onChanged, onDeleted,
+  project, userId, teamId, canDelete, onChanged, onDeleted,
 }: {
   project: Project
   userId: string
+  teamId: string
   canDelete: boolean
   onChanged: () => void
   onDeleted: () => void
@@ -104,6 +106,7 @@ export default function Vault({
         duration_ms: fields.duration_ms,
         lead_silence_ms: 0,
         tail_silence_ms: 0,
+        measured: false,
       }).eq('series_asset_id', id)
     }
 
@@ -367,6 +370,19 @@ export default function Vault({
                   </button>
                   <span className="dur tnum">{formatMs(asset.duration_ms ?? 0)}</span>
                   <button className="btn" data-variant="quiet" onClick={() => setTrim(asset)}>Trim</button>
+                  <button className="btn" data-variant="quiet" disabled={busy === asset.id}
+                    title="Keep it in the library, so it survives this series"
+                    onClick={async () => {
+                      setBusy(asset.id)
+                      try {
+                        await saveAssetToLibrary(teamId, userId, asset, project.name)
+                        toast(`${asset.name} kept. It will outlive this series.`)
+                      } catch (e) {
+                        toast(e instanceof Error ? e.message : 'Could not keep it', 'bad')
+                      } finally { setBusy(null) }
+                    }}>
+                    Keep
+                  </button>
                   {asset.kind === 'sfx' && (
                     <button className="btn" data-variant="quiet" disabled={busy === asset.id}
                       onClick={() => generate(asset)}>

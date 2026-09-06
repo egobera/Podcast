@@ -1,4 +1,4 @@
-# Estudio
+# Canon
 
 Production workspace for serialized audio fiction. The script is the interface: paste it, see
 everything the episode needs, fill each gap, hear the whole thing.
@@ -267,7 +267,7 @@ Si clonas a alguien de Madrid, seguirá sonando a Madrid por mucho que el texto 
 Por eso no existe un código `es-MX`: el modelo solo conoce `es`. La variedad regional sale de dos
 sitios que sí controlas, el acento de la voz y el vocabulario del guion.
 
-En Estudio, el idioma y el acento de la serie se fijan en la bóveda. Cada personaje puede tener su
+En Canon, el idioma y el acento de la serie se fijan en la bóveda. Cada personaje puede tener su
 propio acento si el papel lo pide, y la app avisa cuando difiere del de la serie.
 
 **Consecuencia práctica:** graba la muestra de clonación en el mismo idioma y acento en que vas a
@@ -278,7 +278,7 @@ publicar. Es una decisión que se arrastra durante todas las temporadas.
 Todo pertenece a un equipo, no a una persona. Los miembros de un equipo ven las mismas series, la
 misma bóveda y las mismas voces. Nada se duplica.
 
-**Invitar a alguien** es escribir su correo en la pestaña Team y elegir un rol. **Estudio no envía
+**Invitar a alguien** es escribir su correo en la pestaña Team y elegir un rol. **Canon no envía
 ningún correo**: la invitación queda guardada y se convierte en acceso real en cuanto esa persona
 crea su cuenta o entra con esa dirección. Avísale tú por el canal que uses normalmente.
 
@@ -822,7 +822,7 @@ hacerlo a mano:
 - **Edición fina en milisegundos.** Se exporta a un DAW y se trabaja ahí
 - **Masterización.** La app normaliza al objetivo del proyecto y nada más
 
-Estudio coloca y organiza. No talla. Esa frontera es una decisión, no una carencia.
+Canon coloca y organiza. No talla. Esa frontera es una decisión, no una carencia.
 
 ---
 

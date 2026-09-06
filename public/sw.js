@@ -9,7 +9,7 @@
  * would be worse than none, and a cached list of takes would be a lie.
  */
 
-const SHELL = 'estudio-shell-v1'
+const SHELL = 'canon-shell-v1'
 
 self.addEventListener('install', event => {
   event.waitUntil(

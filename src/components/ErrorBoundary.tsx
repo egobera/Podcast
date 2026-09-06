@@ -15,7 +15,7 @@ export default class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Estudio crashed:', error, info.componentStack)
+    console.error('Canon crashed:', error, info.componentStack)
   }
 
   render() {

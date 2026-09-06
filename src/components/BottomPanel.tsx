@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { EpisodePlayer, LANES, laneOf, type Clip, type Lane, type Monitor } from '../lib/player'
+import { EpisodePlayer, LANES, laneOf, extractPeaks, type Clip, type Lane, type Monitor } from '../lib/player'
 import { Play, Pause, SkipBack, SkipForward, ChevronDown, ChevronUp, Spinner } from './icons'
-import type { AudioElement, Episode, GainRole } from '../lib/types'
+import type { AudioElement, Character, Episode, GainRole } from '../lib/types'
+import { colourFor, dim, labelFor } from '../lib/palette'
+import ClipCard from './ClipCard'
 
 const LANE_LABEL: Record<Lane, string> = { voice: 'Voice', music: 'Music', effects: 'Sound' }
 /* Three hues inside the blue family: cerulean for voice, indigo for music, steel for sound.
@@ -11,7 +13,7 @@ const LANE_MIN = 26
 const LANE_MAX = 74
 const PANEL_MIN = 150
 const PANEL_MAX = 620
-const PANEL_KEY = 'estudio.panelHeight'
+const PANEL_KEY = 'canon.panelHeight'
 
 /** The shortest window you can zoom into. Below this the ruler stops meaning anything. */
 const MIN_SPAN_MS = 2000
@@ -43,7 +45,7 @@ function stepFor(totalMs: number, width: number) {
 export default function BottomPanel({
   elements, total, duckDb, buildClips, selectedId, onSelect,
   episode, onLaneGain, onGain, onNudge, onTrimEdges, onTrimSelected, onSplit, onFade, onMeasured,
-  onFitToAudio, extraSelected,
+  onFitToAudio, extraSelected, characters,
 }: {
   elements: (AudioElement & { start_ms: number })[]
   total: number
@@ -62,6 +64,7 @@ export default function BottomPanel({
   onSplit: (elementId: string, atMs: number) => void
   onFitToAudio: (elementId: string) => void
   onFade: (elementId: string, inMs: number | null, outMs: number | null) => void
+  characters: Character[]
 }) {
   const player = useRef<EpisodePlayer | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'playing'>('idle')
@@ -78,7 +81,8 @@ export default function BottomPanel({
    * Lane height follows it: a taller panel is only useful if the waveforms grow too.
    */
   const [panelHeight, setPanelHeight] = useState(() => {
-    const saved = Number(localStorage.getItem(PANEL_KEY))
+    // The app used to be called something else; a height set then still applies.
+    const saved = Number(localStorage.getItem(PANEL_KEY) ?? localStorage.getItem('estudio.panelHeight'))
     return saved >= PANEL_MIN && saved <= PANEL_MAX ? saved : 210
   })
   const laneH = Math.round(Math.min(Math.max((panelHeight - 96) / LANES.length, LANE_MIN), LANE_MAX))
@@ -117,9 +121,43 @@ export default function BottomPanel({
   const [dragOffset, setDragOffsetState] = useState<number | null>(null)
   const lastDelta = useRef<number | null>(null)
   const [dragEdges, setDragEdges] = useState<{ lead: number; tail: number } | null>(null)
+  const peakCache = useRef(new Map<string, Float32Array>())
+
+  /** Where each scene begins, for the band above and the dividers behind. */
+  const scenes = (() => {
+    const out: { name: string; startMs: number }[] = []
+    for (const el of [...elements].sort((a, b) => a.idx - b.idx)) {
+      if (out.length === 0 || out[out.length - 1].name !== el.scene) {
+        out.push({ name: el.scene, startMs: el.start_ms })
+      }
+    }
+    return out
+  })()
   const pendingEdges = useRef<{ lead: number; tail: number } | null>(null)
   const headRef = useRef(0)
   const groupDelta = useRef<number | null>(null)
+  const [popover, setPopover] = useState<{ id: string; x: number } | null>(null)
+  const [hover, setHover] = useState<
+    { x: number; ms: number; label: string; colour: string; length: number } | null>(null)
+
+  /** Reading the timeline should not require clicking it. */
+  function onHover(e: React.PointerEvent) {
+    const rect = laneArea.current?.getBoundingClientRect()
+    if (!rect) return
+    const x = e.clientX - rect.left
+    const ms = viewStart + (x / rect.width) * span
+    const lane = LANES[Math.floor((e.clientY - rect.top) / laneH)]
+    const under = lane && drawable.find(c =>
+      c.lane === lane && ms >= c.startMs && ms <= c.startMs + c.durationMs)
+    const el = under && elements.find(e => e.id === under.id)
+    setHover({
+      x,
+      ms,
+      label: under?.label ?? '',
+      colour: under?.colour ?? '',
+      length: el ? el.duration_ms : 0,
+    })
+  }
   const panelHeightRef = useRef(0)
   panelHeightRef.current = panelHeight
   const setDragOffset = (v: number | null) => {
@@ -218,11 +256,23 @@ export default function BottomPanel({
         ? Math.max(e.duration_ms - dragEdges.lead - dragEdges.tail, 40)
         : Math.max(e.duration_ms - (e.lead_silence_ms ?? 0) - (e.tail_silence_ms ?? 0), 40),
       url: clips.find(c => c.id === e.id)?.url,
+      colour: colourFor(e, characters),
+      label: labelFor(e, characters),
       // Anything that has been generated has audio, approved or not. Treating only
       // approved clips as real made a freshly generated episode look empty.
       ready: e.status === 'approved' || e.status === 'generated' || !!e.series_asset_id,
     }))
 
+  /**
+   * The timeline, drawn to be read.
+   *
+   * The old one was a row of anonymous rectangles: it told you where sound existed and
+   * nothing else. Three things changed that. Every clip carries its speaker and its first
+   * words, so a line can be found without clicking it. Every character has a colour, so
+   * the voice lane shows the shape of the conversation before you read anything. And the
+   * scenes are drawn as a band across the top, so an episode has visible structure instead
+   * of being one long strip.
+   */
   const draw = useCallback(() => {
     const cv = canvas.current
     if (!cv || width <= 0) return
@@ -240,83 +290,134 @@ export default function BottomPanel({
 
     LANES.forEach((lane, li) => {
       const top = li * laneH
-      const barH = laneH - 8
-      const y = top + 4
+      const barH = laneH - 6
+      const y = top + 3
 
-      g.fillStyle = '#15202c'
-      roundRect(g, 0, y, width, barH, 4)
-      g.fill()
+      // The lane bed, with a hairline so lanes read as separate rows.
+      g.fillStyle = li % 2 === 0 ? '#131d28' : '#111a24'
+      g.fillRect(0, top, width, laneH)
+      g.strokeStyle = 'rgba(255,255,255,.035)'
+      g.beginPath()
+      g.moveTo(0, top + laneH - 0.5)
+      g.lineTo(width, top + laneH - 0.5)
+      g.stroke()
 
       const silenced = muted.has(lane) || (soloed.size > 0 && !soloed.has(lane))
 
-      for (const c of drawable) {
-        if (c.lane !== lane) continue
+      for (const c of drawable.filter(d => d.lane === lane)) {
         const x = px(c.startMs)
-        const w = Math.max(px(c.durationMs), 2)
-        const base = LANE_COLOR[lane]
+        const w = Math.max(px(c.startMs + c.durationMs) - x, 3)
+        if (x + w < -40 || x > width + 40) continue
 
-        g.globalAlpha = silenced ? 0.22 : c.ready ? 1 : 0.34
-        g.fillStyle = base
-        roundRect(g, x, y + 1, w, barH - 2, 2)
+        const selected = c.id === selectedId
+        const grouped = extraSelected?.has(c.id)
+        g.globalAlpha = silenced ? 0.22 : 1
+
+        // Body
+        g.fillStyle = c.ready ? dim(c.colour, 0.34) : 'rgba(255,255,255,.05)'
+        roundRect(g, x, y, w, barH, 3)
         g.fill()
 
-        const peaks = c.url ? player.current?.peaksFor(c.url) : null
-        if (peaks && w > 4) {
-          g.globalAlpha = silenced ? 0.3 : 0.85
-          g.fillStyle = '#0d1620'
-          const mid = y + barH / 2
-          const half = (barH - 4) / 2
-          const cols = Math.min(Math.floor(w), peaks.length)
-          for (let i = 0; i < cols; i++) {
-            const p = peaks[Math.floor((i / cols) * peaks.length)]
-            const bh = Math.max(half * (1 - p), 0.5)
-            g.fillRect(x + i, mid - half, 1, bh)
-            g.fillRect(x + i, mid + half - bh, 1, bh)
-          }
+        // A colour spine on the left edge: the fastest way to tell who is speaking.
+        if (c.ready) {
+          g.fillStyle = c.colour
+          roundRect(g, x, y, Math.min(3, w), barH, 2)
+          g.fill()
+        } else {
+          g.strokeStyle = 'rgba(255,255,255,.18)'
+          g.setLineDash([3, 3])
+          roundRect(g, x + 0.5, y + 0.5, Math.max(w - 1, 2), barH - 1, 3)
+          g.stroke()
+          g.setLineDash([])
         }
 
-        const el = elements.find(x => x.id === c.id)
+        // Waveform, mirrored around the middle of the clip.
+        const peaks = c.url ? peakCache.current.get(c.url) : undefined
+        if (peaks && w > 6) {
+          const mid = y + barH / 2
+          const half = (barH - 8) / 2
+          g.fillStyle = c.colour
+          g.globalAlpha = silenced ? 0.22 : 0.85
+          const from = Math.max(x, 0)
+          const to = Math.min(x + w, width)
+          for (let sx = from; sx < to; sx++) {
+            const t = (sx - x) / w
+            const v = peaks[Math.min(Math.floor(t * peaks.length), peaks.length - 1)]
+            const bar = Math.max(v * half, 0.5)
+            g.fillRect(sx, mid - bar, 1, bar * 2)
+          }
+          g.globalAlpha = silenced ? 0.22 : 1
+        }
+
+        // Deliberate fades, drawn as the part being taken away.
+        const el = elements.find(x2 => x2.id === c.id)
         const fadeIn = el?.fade_in_ms ?? 0
         const fadeOut = el?.fade_out_ms ?? 0
-        if ((fadeIn > 0 || fadeOut > 0) && w > 6) {
-          // The ramp is drawn as the part being taken away, which is how it reads at a
-          // glance: the clip arrives out of nothing and leaves into nothing.
-          g.globalAlpha = 1
-          g.fillStyle = '#0e1621'
+        if ((fadeIn > 0 || fadeOut > 0) && w > 8) {
+          g.fillStyle = 'rgba(11,17,24,.82)'
           if (fadeIn > 0) {
-            const fw = Math.min(px(fadeIn), w)
-            g.beginPath()
-            g.moveTo(x, y + 1)
-            g.lineTo(x + fw, y + 1)
-            g.lineTo(x, y + barH - 1)
-            g.closePath()
-            g.fill()
+            const fw = Math.min(((fadeIn / span) * width), w)
+            g.beginPath(); g.moveTo(x, y); g.lineTo(x + fw, y); g.lineTo(x, y + barH)
+            g.closePath(); g.fill()
           }
           if (fadeOut > 0) {
-            const fw = Math.min(px(fadeOut), w)
-            g.beginPath()
-            g.moveTo(x + w, y + 1)
-            g.lineTo(x + w - fw, y + 1)
-            g.lineTo(x + w, y + barH - 1)
-            g.closePath()
-            g.fill()
+            const fw = Math.min(((fadeOut / span) * width), w)
+            g.beginPath(); g.moveTo(x + w, y); g.lineTo(x + w - fw, y); g.lineTo(x + w, y + barH)
+            g.closePath(); g.fill()
           }
         }
 
-        if (c.id === selectedId || extraSelected?.has(c.id)) {
-          g.globalAlpha = 1
-          g.strokeStyle = c.id === selectedId ? '#e6f0fa' : '#7fb0e0'
-          g.lineWidth = 1
-          roundRect(g, x + 0.5, y + 1.5, Math.max(w - 1, 2), barH - 3, 2)
+        /*
+         * No text on the clip.
+         *
+         * A label and a waveform fight for the same few pixels, and the waveform is the
+         * thing you are actually reading: where the words are, where the breath is, where
+         * the silence sits. The name is one hover away, and the whole clip is one click
+         * away, so nothing is lost by keeping the surface quiet.
+         */
+
+        if (selected || grouped) {
+          g.strokeStyle = selected ? '#ffffff' : c.colour
+          g.lineWidth = selected ? 1.5 : 1
+          roundRect(g, x + 0.75, y + 0.75, Math.max(w - 1.5, 2), barH - 1.5, 3)
           g.stroke()
+          g.lineWidth = 1
+
+          // Handles, so the edges announce that they can be dragged.
+          if (selected && w > 14) {
+            g.fillStyle = '#ffffff'
+            g.fillRect(x, y + barH / 2 - 6, 2, 12)
+            g.fillRect(x + w - 2, y + barH / 2 - 6, 2, 12)
+          }
         }
+
+        g.globalAlpha = 1
       }
-      g.globalAlpha = 1
     })
-  }, [width, total, drawable, muted, soloed, selectedId, viewStart, span, laneH, elements, extraSelected])
+
+    // Scene boundaries, running the full height behind everything else.
+    g.strokeStyle = 'rgba(255,255,255,.10)'
+    g.setLineDash([2, 4])
+    for (const s of scenes) {
+      const x = px(s.startMs)
+      if (x < 0 || x > width) continue
+      g.beginPath(); g.moveTo(x + 0.5, 0); g.lineTo(x + 0.5, h); g.stroke()
+    }
+    g.setLineDash([])
+  }, [width, drawable, muted, soloed, selectedId, viewStart, span, laneH, elements, extraSelected, scenes])
+
 
   useEffect(() => { draw() })
   useEffect(() => { moveHead(head) }, [width, collapsed, moveHead, head, viewStart, span, panelHeight])
+
+  /* Anything that has to stop above the panel needs to know how tall it currently is. */
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      '--panel-h',
+      `${collapsed ? 52 : panelHeight + 8}px`,
+    )
+    return () => { document.documentElement.style.removeProperty('--panel-h') }
+  }, [panelHeight, collapsed])
 
   function tick() {
     const ms = player.current?.currentMs ?? 0
@@ -347,6 +448,14 @@ export default function BottomPanel({
         (done, t) => setProgress({ done, total: t }),
         onMeasured,
       )
+
+      // The player has the buffers; the timeline needs their shape.
+      for (const clip of list) {
+        if (peakCache.current.has(clip.url)) continue
+        const buffer = player.current.bufferFor(clip.url)
+        if (buffer) peakCache.current.set(clip.url, extractPeaks(buffer, 1200))
+      }
+      draw()
       draw()
     }
     player.current.play(fromMs)
@@ -498,6 +607,11 @@ export default function BottomPanel({
         window.removeEventListener('pointermove', move)
         window.removeEventListener('pointerup', up)
         setDragging(null)
+        if (!moved) {
+          const rect2 = laneArea.current?.getBoundingClientRect()
+          const at = rect2 ? ((hit.startMs + hit.durationMs / 2 - viewStart) / span) * rect2.width : 0
+          setPopover({ id: hit.id, x: at })
+        }
         if (moved) {
           if (mode === 'move') {
             const shift = Math.round(groupDelta.current ?? 0)
@@ -517,6 +631,7 @@ export default function BottomPanel({
       return
     }
 
+    setPopover(null)
     seek(ms)
     const move = (ev: PointerEvent) => seek(toMs(ev.clientX))
     const up = () => {
@@ -594,48 +709,6 @@ export default function BottomPanel({
           <span className="tp-status">Preparing {progress.done} of {progress.total}</span>
         )}
 
-        {selected && (
-          <div className="clip-tools">
-            <span className="clip-name">{selected.text_content.slice(0, 34)}</span>
-            <button className="tp-btn" onClick={() => nudgeGain(-1)} title="Quieter by 1 dB">−</button>
-            <span className="fader-db tnum">
-              {selected.gain_db > 0 ? '+' : ''}{selected.gain_db} dB
-            </span>
-            <button className="tp-btn" onClick={() => nudgeGain(1)} title="Louder by 1 dB">+</button>
-            <button className="tp-btn" onClick={() => onNudge(selected.id, (selected.offset_ms ?? 0) - 100)}
-              title="100 ms earlier">◀</button>
-            <span className="fader-db tnum">
-              {(selected.offset_ms ?? 0) > 0 ? '+' : ''}{selected.offset_ms ?? 0} ms
-            </span>
-            <button className="tp-btn" onClick={() => onNudge(selected.id, (selected.offset_ms ?? 0) + 100)}
-              title="100 ms later">▶</button>
-            <label className="clip-fade">
-              in
-              <input type="number" min={0} max={8000} step={100}
-                value={selected.fade_in_ms ?? 0}
-                onChange={e => onFade(selected.id, Number(e.target.value) || null, selected.fade_out_ms)} />
-            </label>
-            <label className="clip-fade">
-              out
-              <input type="number" min={0} max={8000} step={100}
-                value={selected.fade_out_ms ?? 0}
-                onChange={e => onFade(selected.id, selected.fade_in_ms, Number(e.target.value) || null)} />
-            </label>
-            <button className="btn" data-variant="quiet"
-              disabled={head <= selected.start_ms || head >= selected.start_ms + selected.duration_ms}
-              onClick={() => onSplit(selected.id, head)}
-              title="Cut this clip in two at the playhead">
-              Split
-            </button>
-            <button className="btn" data-variant="quiet"
-              onClick={() => onFitToAudio(selected.id)}
-              title="Give this clip the full length of its file">
-              Fit
-            </button>
-            <button className="btn" data-variant="quiet" onClick={onTrimSelected}>Trim</button>
-          </div>
-        )}
-
         <div className="zoom-tools">
           <button className="tp-btn" onClick={() => zoomAround(1.6)} title="Zoom out">−</button>
           <span className="zoom-read tnum">{(span / 1000).toFixed(span < 20000 ? 1 : 0)}s</span>
@@ -661,8 +734,12 @@ export default function BottomPanel({
           <div className="lane-heads">
             <div className="ruler-spacer" />
             {LANES.map(lane => (
-              <div className="lane-head" key={lane} style={{ height: laneH }}>
+              <div className="lane-head" key={lane} style={{ height: laneH }} data-lane={lane}>
+                <span className="lane-swatch" style={{ background: LANE_COLOR[lane] }} />
                 <span className="lane-name">{LANE_LABEL[lane]}</span>
+                <span className="lane-count tnum">
+                  {drawable.filter(c => c.lane === lane).length}
+                </span>
                 <button
                   className="lane-btn" data-on={muted.has(lane)}
                   onClick={() => toggle(muted, lane, setMuted)}
@@ -688,15 +765,70 @@ export default function BottomPanel({
             ))}
           </div>
 
-          <div className="lane-area" ref={laneArea} onPointerDown={onPointerDown} onWheel={onWheel}>
+          <div className="lane-area" ref={laneArea} onPointerDown={onPointerDown} onWheel={onWheel}
+            onPointerMove={onHover} onPointerLeave={() => setHover(null)}>
+          <div className="scene-band">
+            {scenes.map((sc, i) => {
+              const next = scenes[i + 1]
+              const from = ((sc.startMs - viewStart) / span) * 100
+              const to = next ? ((next.startMs - viewStart) / span) * 100 : 100
+              if (to < 0 || from > 100) return null
+              return (
+                <span
+                  key={`${sc.name}-${sc.startMs}`}
+                  className="scene-chip"
+                  style={{ left: `${Math.max(from, 0)}%`, width: `${Math.min(to, 100) - Math.max(from, 0)}%` }}
+                  title={sc.name}
+                >
+                  {sc.name}
+                </span>
+              )
+            })}
+          </div>
             <div className="ruler">
               {ticks.map(ms => (
-                <span className="tick" key={ms} style={{ left: `${(ms / span) * 100}%` }}>
+                <span className="tick" key={ms} style={{ left: `${((ms - viewStart) / span) * 100}%` }}>
                   <i /><b className="tnum">{tc(ms).slice(0, -2)}</b>
                 </span>
               ))}
             </div>
             <canvas ref={canvas} className="lane-canvas" />
+
+            {hover && !popover && (
+              <div className="hover-tip" style={{ left: `${hover.x}px` }}>
+                <span className="hover-time tnum">{tc(hover.ms)}</span>
+                {hover.label && (
+                  <>
+                    <span className="hover-dot" style={{ background: hover.colour }} />
+                    <span className="hover-label">{hover.label}</span>
+                    <span className="hover-len tnum">{tc(hover.length)}</span>
+                  </>
+                )}
+              </div>
+            )}
+            {popover && (() => {
+              const el = elements.find(e => e.id === popover.id)
+              if (!el) return null
+              const inside = head > el.start_ms && head < el.start_ms + el.duration_ms
+              return (
+                <ClipCard
+                  element={el}
+                  characters={characters}
+                  x={popover.x}
+                  playing={false}
+                  canSplit={inside}
+                  onPlay={() => onSelect(el.id)}
+                  onGain={db => onGain(el.id, db)}
+                  onNudge={ms => onNudge(el.id, ms)}
+                  onFade={(a, b) => onFade(el.id, a, b)}
+                  onFit={() => onFitToAudio(el.id)}
+                  onSplit={() => onSplit(el.id, head)}
+                  onTrim={onTrimSelected}
+                  onClose={() => setPopover(null)}
+                />
+              )
+            })()}
+
             {view && (
               <div className="minimap" title="Where you are in the episode">
                 <span style={{

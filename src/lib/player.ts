@@ -41,6 +41,31 @@ const BED_FADE = 1.2
  * every line sits in its own little pocket of nothing and the episode stops feeling like a
  * conversation. This finds the real edges so they can be skipped.
  */
+/**
+ * How loud a clip actually is, measured only where there is sound.
+ *
+ * Generated takes come back at noticeably different levels, and the ear reads a jump in
+ * loudness between two lines as a cut. Averaging across the whole file would be dragged
+ * down by the silence at each end, so only samples above the floor count.
+ */
+export function loudness(buffer: AudioBuffer, floorDb = -45): number {
+  const data = buffer.getChannelData(0)
+  const floor = Math.pow(10, floorDb / 20)
+  const step = Math.max(1, Math.floor(data.length / 24000))
+
+  let sum = 0
+  let n = 0
+  for (let i = 0; i < data.length; i += step) {
+    const v = Math.abs(data[i])
+    if (v > floor) { sum += v * v; n++ }
+  }
+  return n > 0 ? Math.sqrt(sum / n) : 0
+}
+
+/** Target level for speech, and how far a single clip may be pushed to reach it. */
+const VOICE_TARGET_RMS = 0.09
+const MAX_MATCH_DB = 7
+
 export function findEdges(buffer: AudioBuffer, floorDb = -45): { lead: number; tail: number } {
   const data = buffer.getChannelData(0)
   const floor = Math.pow(10, floorDb / 20)
@@ -89,6 +114,7 @@ export class EpisodePlayer {
   private master: GainNode | null = null
   private monitorIn: AudioNode | null = null
   private buffers = new Map<string, AudioBuffer>()
+  private levels = new Map<string, number>()
   private peaks = new Map<string, Float32Array>()
   private sources: AudioBufferSourceNode[] = []
   private startedAt = 0
@@ -143,6 +169,11 @@ export class EpisodePlayer {
   }
 
   private laneGain: Record<string, number> = {}
+
+  /** The decoded audio, so the timeline can draw what it is about to play. */
+  bufferFor(url: string): AudioBuffer | undefined {
+    return this.buffers.get(url)
+  }
 
   setLaneState(muted: Set<Lane>, soloed: Set<Lane>, gains: Record<string, number> = {}) {
     this.muted = new Set(muted)
@@ -223,6 +254,16 @@ export class EpisodePlayer {
 
   bufferMap() { return this.buffers }
 
+  /**
+   * Gaps shorter than this do not let the music back up.
+   *
+   * Ducking recovered the moment a line stopped, so with three hundred milliseconds
+   * between speakers the bed rose and fell between every sentence. That pumping is far
+   * more noticeable than the ducking it was trying to do. Two people trading lines is one
+   * conversation, and the music should treat it as one.
+   */
+  private static readonly JOIN_GAP_S = 2.2
+
   private voiceWindows(): [number, number][] {
     const raw = this.clips
       .filter(c => c.role === 'voice')
@@ -261,7 +302,21 @@ export class EpisodePlayer {
 
       const gain = ctx.createGain()
       const offset = clip.gainDb ?? 0
-      const base = dbToGain(GAIN_TABLE[clip.role] + offset)
+
+      /*
+       * Speech is nudged towards a common level. The correction is capped: a clip that is
+       * genuinely quiet because somebody whispers should stay a whisper, and pushing it
+       * seven decibels is already more than a mix engineer would do without listening.
+       */
+      let match = 0
+      if (clip.role === 'voice') {
+        const rms = this.levels.get(clip.url) ?? 0
+        if (rms > 0.002) {
+          match = Math.max(Math.min(20 * Math.log10(VOICE_TARGET_RMS / rms), MAX_MATCH_DB), -MAX_MATCH_DB)
+        }
+      }
+
+      const base = dbToGain(GAIN_TABLE[clip.role] + offset + match)
       const ducks = clip.role === 'bed' || clip.role === 'ambience'
       const isMusic = clip.role === 'bed' || clip.role === 'theme'
 

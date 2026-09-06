@@ -7,7 +7,7 @@ import Comments from './Comments'
 import { applyDirection, effectiveDirection, supportsTags, DIRECTION_HINTS } from '../lib/direction'
 import { buildSoundPrompt } from '../lib/soundprompt'
 import { pacingFor, DEFAULT_PACING, type Pacing } from '../lib/pacing'
-import type { AudioElement, Character, Comment, Episode, SeriesAsset, SeriesBlock, Take } from '../lib/types'
+import type { AudioElement, Character, Comment, Episode, SceneTake, SeriesAsset, SeriesBlock, Take } from '../lib/types'
 
 interface Props {
   element: (AudioElement & { start_ms: number }) | null
@@ -31,6 +31,10 @@ interface Props {
   onPlayElement: () => void
   onAddBlock: (blockId: string) => void
   onStopAudio: () => void
+  sceneLines: number
+  sceneTake: SceneTake | null
+  onGenerateScene: () => void
+  onDropSceneTake: () => void
   onRemoveBlock: (blockId: string) => void
   onAddVault: (assetId: string) => void
   onExport: () => void
@@ -41,6 +45,8 @@ interface Props {
   onPacing: (next: Partial<Pacing>) => void
   onEditText: (text: string) => void
   onDeleteElement: () => void
+  cast: Character[]
+  onSetCharacter: (characterId: string | null) => void
   onInsertAfter: (kind: 'dialogue' | 'sfx' | 'music' | 'ambience' | 'pause' | 'scene') => void
   comments: Comment[]
   userId: string
@@ -76,6 +82,16 @@ export default function Inspector(p: Props) {
         onSave={p.onEditText}
       />
 
+      {!isTemplate && !isBlock && (
+        <button
+          className="btn danger-quiet ip-remove"
+          onClick={p.onDeleteElement}
+          title="Remove this line from the episode"
+        >
+          Delete this line
+        </button>
+      )}
+
       {hasAudio && (
         <button className="btn ip-play" onClick={p.onPlayElement}>
           {preview.playing ? <PauseIcon size={12} /> : <PlayIcon size={12} />}
@@ -102,8 +118,69 @@ export default function Inspector(p: Props) {
         </>
       )}
 
+      {el.kind === 'dialogue' && !isTemplate && p.sceneLines >= 2 && (
+        <div className="ip-section">
+          <span className="ip-label">This scene</span>
+
+          {p.sceneTake ? (
+            <>
+              <p className="notice">
+                The {p.sceneTake.element_ids.length} lines of this scene were performed together,
+                so they share one file. That is why they flow; it is also why one of them cannot
+                be redone on its own.
+              </p>
+              <div className="btn-row">
+                <button className="btn" disabled={p.busy} onClick={p.onGenerateScene}>
+                  {p.busy ? 'Performing' : 'Perform it again'}
+                </button>
+                <button className="btn danger-quiet" onClick={p.onDropSceneTake}>
+                  Back to one take per line
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="notice">
+                Generated line by line, every take was recorded without knowing the others exist,
+                and no amount of spacing makes that sound like a conversation. Performed together,
+                the model decides where somebody comes in early and where a pause belongs.
+              </p>
+              <button className="btn" data-variant="primary" disabled={p.busy}
+                onClick={p.onGenerateScene}>
+                {p.busy ? 'Performing' : `Perform these ${p.sceneLines} lines together`}
+              </button>
+              <span className="hint">
+                Best for fast exchanges. A narrator, or anything you expect to redo one line at a
+                time, is better off as it is.
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
       {el.kind === 'dialogue' && !isTemplate && (
         <>
+          <div className="field">
+            <label>Who says it</label>
+            <select
+              value={el.character_id ?? ''}
+              onChange={e => p.onSetCharacter(e.target.value || null)}
+            >
+              <option value="">Nobody yet</option>
+              {p.cast.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name}{c.voice_id ? '' : ' · no voice'}
+                </option>
+              ))}
+            </select>
+            {!el.character_id && (
+              <span className="hint">
+                A line with nobody attached generates nothing. Lines read from a script get this
+                automatically; one added by hand has to be told.
+              </span>
+            )}
+          </div>
+
           <div className="ip-row">
             <span className="ip-label">Voice</span>
             <span className="ip-value">
@@ -175,7 +252,7 @@ export default function Inspector(p: Props) {
       )}
 
       {!isTemplate && !isBlock && (
-        <div className="line-actions">
+        <div className="line-actions" id="line-actions">
           <select className="inline" value=""
             onChange={e => {
               if (!e.target.value) return
@@ -190,9 +267,6 @@ export default function Inspector(p: Props) {
             <option value="pause">A silence</option>
             <option value="scene">A new scene</option>
           </select>
-          <button className="btn danger-quiet" onClick={p.onDeleteElement}>
-            Delete this line
-          </button>
         </div>
       )}
 

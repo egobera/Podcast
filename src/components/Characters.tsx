@@ -6,9 +6,17 @@ import { parseCast } from '../lib/parser'
 import { type Usage } from '../lib/usage'
 import { loadUsage } from '../lib/usageQuery'
 import VoiceDesigner from './VoiceDesigner'
+import { saveVoiceToLibrary } from '../lib/library'
 import type { Character, Project } from '../lib/types'
 
-export default function Characters({ project, onChanged }: { project: Project; onChanged: () => void }) {
+export default function Characters({
+  project, userId, teamId, onChanged,
+}: {
+  project: Project
+  userId: string
+  teamId: string
+  onChanged: () => void
+}) {
   const [chars, setChars] = useState<Character[]>([])
   const [editing, setEditing] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
@@ -138,7 +146,7 @@ export default function Characters({ project, onChanged }: { project: Project; o
       {error && <p className="error">{error}</p>}
 
       {chars.length === 0 && (
-        <div className="empty">No characters yet. Import a script and Estudio finds them for you.</div>
+        <div className="empty">No characters yet. Import a script and Canon finds them for you.</div>
       )}
 
       <div className="cards">
