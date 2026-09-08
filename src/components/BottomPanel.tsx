@@ -45,7 +45,8 @@ function stepFor(totalMs: number, width: number) {
 export default function BottomPanel({
   elements, total, duckDb, buildClips, selectedId, onSelect,
   episode, onLaneGain, onGain, onNudge, onTrimEdges, onTrimSelected, onSplit, onFade, onMeasured,
-  onFitToAudio, extraSelected, characters,
+  onFitToAudio, onDeleteClip, onAddAfterClip, onEditClipText, onClipDirection,
+  onClipCharacter, extraSelected, characters,
 }: {
   elements: (AudioElement & { start_ms: number })[]
   total: number
@@ -57,7 +58,7 @@ export default function BottomPanel({
   episode: Episode
   onLaneGain: (lane: Lane, db: number) => void
   onGain: (elementId: string, db: number) => void
-  onNudge: (elementId: string, offsetMs: number) => void
+  onNudge: (elementId: string, offsetMs: number, ripple?: boolean) => void
   onTrimEdges: (elementId: string, leadMs: number, tailMs: number) => void
   onMeasured: (m: { id: string; durationMs: number; leadMs: number; tailMs: number }[]) => void
   onTrimSelected: () => void
@@ -65,6 +66,11 @@ export default function BottomPanel({
   onFitToAudio: (elementId: string) => void
   onFade: (elementId: string, inMs: number | null, outMs: number | null) => void
   characters: Character[]
+  onDeleteClip: (elementId: string) => void
+  onEditClipText: (elementId: string, text: string) => void
+  onClipDirection: (elementId: string, direction: string) => void
+  onClipCharacter: (elementId: string, characterId: string | null) => void
+  onAddAfterClip: (elementId: string, kind: string) => void
 }) {
   const player = useRef<EpisodePlayer | null>(null)
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'playing'>('idle')
@@ -136,13 +142,14 @@ export default function BottomPanel({
   const pendingEdges = useRef<{ lead: number; tail: number } | null>(null)
   const headRef = useRef(0)
   const groupDelta = useRef<number | null>(null)
+  const rippleOff = useRef(false)
   const [popover, setPopover] = useState<{ id: string; x: number } | null>(null)
   const [hover, setHover] = useState<
     { x: number; ms: number; label: string; colour: string; length: number } | null>(null)
 
   /** Reading the timeline should not require clicking it. */
   function onHover(e: React.PointerEvent) {
-    const rect = laneArea.current?.getBoundingClientRect()
+    const rect = canvas.current?.getBoundingClientRect()
     if (!rect) return
     const x = e.clientX - rect.left
     const ms = viewStart + (x / rect.width) * span
@@ -522,7 +529,15 @@ export default function BottomPanel({
    * offset, so the rhythm engine keeps working around it.
    */
   function onPointerDown(e: React.PointerEvent) {
-    const rect = laneArea.current!.getBoundingClientRect()
+    /*
+     * Measured from the canvas, not from its container.
+     *
+     * The scene band and the ruler live inside the lane area now, so measuring from it put
+     * every click about forty pixels above where it landed: the lane maths never matched a
+     * clip and a click on a line only moved the playhead. The canvas is the thing the
+     * lanes are actually drawn on, so it is the thing to measure against.
+     */
+    const rect = canvas.current?.getBoundingClientRect() ?? laneArea.current!.getBoundingClientRect()
     const toMs = (clientX: number) => viewStart + ((clientX - rect.left) / rect.width) * span
 
     const y = e.clientY - rect.top
@@ -581,6 +596,7 @@ export default function BottomPanel({
 
       const move = (ev: PointerEvent) => {
         const delta = toMs(ev.clientX) - grabbedAt
+        rippleOff.current = ev.altKey
         if (Math.abs(delta) < 24 && !moved) return
         moved = true
 
@@ -608,14 +624,24 @@ export default function BottomPanel({
         window.removeEventListener('pointerup', up)
         setDragging(null)
         if (!moved) {
-          const rect2 = laneArea.current?.getBoundingClientRect()
+          const rect2 = canvas.current?.getBoundingClientRect()
           const at = rect2 ? ((hit.startMs + hit.durationMs / 2 - viewStart) / span) * rect2.width : 0
           setPopover({ id: hit.id, x: at })
         }
         if (moved) {
           if (mode === 'move') {
             const shift = Math.round(groupDelta.current ?? 0)
-            for (const g of group) onNudge(g.id, (startOffsets.get(g.id) ?? 0) + shift)
+            /*
+             * Moving one line moves what follows it.
+             *
+             * An episode is a sequence, so pushing a line later to make room for a sound
+             * and leaving the next line where it was does not make room: it makes an
+             * overlap. Rippling is what somebody means by "move this". Holding alt moves
+             * the one clip and leaves the rest, for the times you actually want a gap
+             * closed or an overlap made.
+             */
+            const ripple = !rippleOff.current && group.length === 1
+            for (const g of group) onNudge(g.id, (startOffsets.get(g.id) ?? 0) + shift, ripple)
           }
           else if (pendingEdges.current) {
             onTrimEdges(hit.id, pendingEdges.current.lead, pendingEdges.current.tail)
@@ -656,7 +682,7 @@ export default function BottomPanel({
 
   /** Wheel zooms around the pointer; shift or a horizontal wheel pans. */
   function onWheel(e: React.WheelEvent) {
-    const rect = laneArea.current?.getBoundingClientRect()
+    const rect = canvas.current?.getBoundingClientRect() ?? laneArea.current?.getBoundingClientRect()
     if (!rect) return
     if (e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
       const delta = (e.deltaX || e.deltaY) * span * 0.0015
@@ -716,6 +742,11 @@ export default function BottomPanel({
           <button className="tp-btn" onClick={() => setView(null)} title="Show the whole episode"
             disabled={!view}>Fit</button>
         </div>
+
+        <button className="tp-btn" title="Keyboard shortcuts"
+          onClick={() => document.dispatchEvent(new KeyboardEvent('keydown', { key: '?' }))}>
+          ?
+        </button>
 
         <div className="tp-right">
           <div className="segmented dark" role="group" aria-label="Monitoring">
@@ -824,6 +855,11 @@ export default function BottomPanel({
                   onFit={() => onFitToAudio(el.id)}
                   onSplit={() => onSplit(el.id, head)}
                   onTrim={onTrimSelected}
+                  onEditText={t => onEditClipText(el.id, t)}
+                  onDirection={d => onClipDirection(el.id, d)}
+                  onSetCharacter={c => onClipCharacter(el.id, c)}
+                  onDelete={() => onDeleteClip(el.id)}
+                  onAddAfter={kind => onAddAfterClip(el.id, kind)}
                   onClose={() => setPopover(null)}
                 />
               )

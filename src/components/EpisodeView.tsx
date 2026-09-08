@@ -446,19 +446,97 @@ export default function EpisodeView({
    * of the scene as the clip and the rest as passengers, which is also why redoing one of
    * them means redoing the scene.
    */
+  /**
+   * Insert something after a given element.
+   *
+   * Lives here rather than inside a prop because two places need it now: the inspector,
+   * where you are reading the script, and the clip card, where you are looking at the
+   * shape of the episode. Adding a beat of silence is something you decide in both.
+   */
+  async function insertAfter(afterId: string, kind: 'dialogue' | 'sfx' | 'music' | 'ambience' | 'pause' | 'scene') {
+
+          const selectedEl = elements.find(e => e.id === afterId)
+          if (!selectedEl) return
+
+          /*
+           * A script is a starting point, not a cage. Anything an episode needs can be
+           * added here: another line, a sound the script never mentioned, a bed under a
+           * moment, a silence, or a scene break that regroups everything after it.
+           */
+          const base = {
+            episode_id: episode.id,
+            idx: selectedEl.idx + 25,
+            scene: selectedEl.scene,
+            origin: 'script' as const,
+            status: 'missing' as const,
+          }
+
+          const shapes: Record<string, Record<string, unknown>> = {
+            dialogue: {
+              kind: 'dialogue', character_id: selectedEl.character_id,
+              text_content: 'Una línea nueva.', anchor: 'line', gain_role: 'voice',
+              duration_ms: 2000,
+            },
+            sfx: {
+              kind: 'sfx', text_content: 'Un sonido nuevo.', anchor: 'line',
+              gain_role: 'spot', duration_ms: 3000,
+            },
+            ambience: {
+              kind: 'ambience', text_content: 'AMBIENTE · Un lugar nuevo.', anchor: 'scene',
+              gain_role: 'ambience', duration_ms: 12000,
+            },
+            music: {
+              kind: 'music', text_content: 'MÚSICA · Una cama nueva.', anchor: 'scene',
+              gain_role: 'bed', duration_ms: 60000,
+            },
+            pause: {
+              kind: 'pause', text_content: 'Silencio. 2 segundos.', anchor: 'line',
+              gain_role: 'auto', duration_ms: 2000, status: 'approved' as const,
+            },
+          }
+
+          if (kind === 'scene') {
+            // A scene break renames everything from here on, so the rhythm engine opens a
+            // real gap and the script reads as two places instead of one long one.
+            const name = `Escena ${new Set(elements.map(e => e.scene)).size + 1}`
+            const after = positionedRef.current
+              .filter(e => e.idx >= selectedEl.idx && e.scene === selectedEl.scene)
+            for (const e of after) {
+              await supabase.from('elements').update({ scene: name }).eq('id', e.id)
+            }
+            await load()
+            toast(`Scene break added. ${after.length} elements moved into ${name}.`)
+            return
+          }
+
+          const { data } = await supabase.from('elements')
+            .insert({ ...base, ...shapes[kind] }).select().single()
+          await load()
+          if (data) {
+            const made = data as AudioElement
+            setSelected(made.id)
+            history.record({
+              label: 'add',
+              undo: async () => { await supabase.from('elements').delete().eq('id', made.id) },
+              redo: async () => { await supabase.from('elements').insert(data) },
+            })
+            toast(kind === 'pause' ? 'Silence added.' : 'Added. Write it and generate.')
+          }
+          }
+
   async function generateScene(scene: string) {
     preview.stop()
     setBusyId(`scene:${scene}`)
     try {
-      const out = await callFunction<{ take_id: string; lines: number }>('generate-scene', {
-        episode_id: episode.id,
-        scene,
-        seed: episode.pacing?.sceneSeed,
-      })
+      const out = await callFunction<{ takes: { take_id: string; lines: number }[]; parts: number; lines: number }>(
+        'generate-scene',
+        { episode_id: episode.id, scene, seed: episode.pacing?.sceneSeed },
+      )
 
-      // The server cannot decode audio, so the length is measured here.
+      // The server cannot decode audio, so every part is measured here.
+      for (const part of out.takes) {
       const { data: take } = await supabase.from('scene_takes')
-        .select('*').eq('id', out.take_id).single()
+        .select('*').eq('id', part.take_id).single()
       if (take) {
         const url = await signedUrl((take as SceneTake).storage_path)
         if (url) {
@@ -466,7 +544,7 @@ export default function EpisodeView({
           const buf = await ctx.decodeAudioData(await (await fetch(url)).arrayBuffer())
           await ctx.close()
           const ms = Math.round(buf.duration * 1000)
-          await supabase.from('scene_takes').update({ duration_ms: ms }).eq('id', out.take_id)
+          await supabase.from('scene_takes').update({ duration_ms: ms }).eq('id', part.take_id)
 
           /*
            * The whole performance hangs off the first line. The rest keep their text and
@@ -483,9 +561,12 @@ export default function EpisodeView({
           }
         }
       }
+      }
 
       await load()
-      toast(`${out.lines} lines performed together. Listen before you keep it.`)
+      toast(out.parts > 1
+        ? `${out.lines} lines performed in ${out.parts} parts, cut between turns so the seams fall in the gaps.`
+        : `${out.lines} lines performed together. Listen before you keep it.`)
     } catch (e) {
       toast(e instanceof Error ? e.message : 'The scene could not be generated', 'bad')
     } finally {
@@ -1394,74 +1475,7 @@ export default function EpisodeView({
           }
           toast('Line deleted. Everything after it moved up.')
         }}
-        onInsertAfter={async kind => {
-          if (!selectedEl) return
-
-          /*
-           * A script is a starting point, not a cage. Anything an episode needs can be
-           * added here: another line, a sound the script never mentioned, a bed under a
-           * moment, a silence, or a scene break that regroups everything after it.
-           */
-          const base = {
-            episode_id: episode.id,
-            idx: selectedEl.idx + 25,
-            scene: selectedEl.scene,
-            origin: 'script' as const,
-            status: 'missing' as const,
-          }
-
-          const shapes: Record<string, Record<string, unknown>> = {
-            dialogue: {
-              kind: 'dialogue', character_id: selectedEl.character_id,
-              text_content: 'Una línea nueva.', anchor: 'line', gain_role: 'voice',
-              duration_ms: 2000,
-            },
-            sfx: {
-              kind: 'sfx', text_content: 'Un sonido nuevo.', anchor: 'line',
-              gain_role: 'spot', duration_ms: 3000,
-            },
-            ambience: {
-              kind: 'ambience', text_content: 'AMBIENTE · Un lugar nuevo.', anchor: 'scene',
-              gain_role: 'ambience', duration_ms: 12000,
-            },
-            music: {
-              kind: 'music', text_content: 'MÚSICA · Una cama nueva.', anchor: 'scene',
-              gain_role: 'bed', duration_ms: 60000,
-            },
-            pause: {
-              kind: 'pause', text_content: 'Silencio. 2 segundos.', anchor: 'line',
-              gain_role: 'auto', duration_ms: 2000, status: 'approved' as const,
-            },
-          }
-
-          if (kind === 'scene') {
-            // A scene break renames everything from here on, so the rhythm engine opens a
-            // real gap and the script reads as two places instead of one long one.
-            const name = `Escena ${new Set(elements.map(e => e.scene)).size + 1}`
-            const after = positionedRef.current
-              .filter(e => e.idx >= selectedEl.idx && e.scene === selectedEl.scene)
-            for (const e of after) {
-              await supabase.from('elements').update({ scene: name }).eq('id', e.id)
-            }
-            await load()
-            toast(`Scene break added. ${after.length} elements moved into ${name}.`)
-            return
-          }
-
-          const { data } = await supabase.from('elements')
-            .insert({ ...base, ...shapes[kind] }).select().single()
-          await load()
-          if (data) {
-            const made = data as AudioElement
-            setSelected(made.id)
-            history.record({
-              label: 'add',
-              undo: async () => { await supabase.from('elements').delete().eq('id', made.id) },
-              redo: async () => { await supabase.from('elements').insert(data) },
-            })
-            toast(kind === 'pause' ? 'Silence added.' : 'Added. Write it and generate.')
-          }
-        }}
+        onInsertAfter={kind => selectedEl && insertAfter(selectedEl.id, kind)}
         onPacing={async next => {
           const merged = { ...pacingFor(episode), ...next }
           await supabase.from('episodes').update({ pacing: merged }).eq('id', episode.id)
@@ -1706,17 +1720,40 @@ export default function EpisodeView({
           episode.lane_gain = next
           setElements(e => [...e])
         }}
-        onNudge={async (id, offsetMs) => {
-          const before = elements.find(e => e.id === id)?.offset_ms ?? 0
-          const set = async (v: number) => {
+        onNudge={async (id, offsetMs, ripple) => {
+          const el = elements.find(e => e.id === id)
+          if (!el) return
+          const before = el.offset_ms ?? 0
+          const delta = offsetMs - before
+
+          /*
+           * Rippling moves everything after it by the same amount, so making room for a
+           * sound genuinely makes room instead of creating an overlap. The offsets of the
+           * lines that follow are what move, so their own adjustments survive.
+           */
+          const after = ripple
+            ? elements.filter(e => e.idx > el.idx && e.kind !== 'pause')
+            : []
+          const previous = new Map(after.map(e => [e.id, e.offset_ms ?? 0]))
+
+          const set = async (v: number, shift: number) => {
             await supabase.from('elements').update({ offset_ms: v }).eq('id', id)
-            setElements(list => list.map(e => (e.id === id ? { ...e, offset_ms: v } : e)))
+            for (const e of after) {
+              await supabase.from('elements')
+                .update({ offset_ms: (previous.get(e.id) ?? 0) + shift }).eq('id', e.id)
+            }
+            setElements(list => list.map(e => {
+              if (e.id === id) return { ...e, offset_ms: v }
+              if (previous.has(e.id)) return { ...e, offset_ms: (previous.get(e.id) ?? 0) + shift }
+              return e
+            }))
           }
-          await set(offsetMs)
+
+          await set(offsetMs, delta)
           history.record({
-            label: 'move',
-            undo: () => set(before),
-            redo: () => set(offsetMs),
+            label: ripple && after.length ? `move, and ${after.length} after it` : 'move',
+            undo: () => set(before, 0),
+            redo: () => set(offsetMs, delta),
           })
         }}
         onMeasured={async measured => {
@@ -1764,6 +1801,64 @@ export default function EpisodeView({
           const next = { fade_in_ms: inMs, fade_out_ms: outMs }
           await set(next)
           history.record({ label: 'fade', undo: () => set(before), redo: () => set(next) })
+        }}
+        onEditClipText={async (id, text) => {
+          const el = elements.find(e => e.id === id)
+          if (!el) return
+          const clean = text.trim()
+          if (!clean || clean === el.text_content) return
+          const before = {
+            text_content: el.text_content, source_hash: el.source_hash,
+            status: el.status, duration_ms: el.duration_ms,
+          }
+          const after = {
+            text_content: clean,
+            source_hash: hash(clean),
+            status: (el.status === 'approved' ? 'stale' : el.status) as typeof el.status,
+            duration_ms: el.kind === 'dialogue' ? estimateSpeechMs(clean) : el.duration_ms,
+          }
+          const set = async (v: typeof before) => {
+            await supabase.from('elements').update(v).eq('id', id)
+            setElements(list => list.map(e => (e.id === id ? { ...e, ...v } : e)))
+          }
+          await set(after)
+          history.record({ label: 'edit the line', undo: () => set(before), redo: () => set(after) })
+        }}
+        onClipDirection={async (id, direction) => {
+          const before = elements.find(e => e.id === id)?.direction ?? ''
+          const set = async (v: string) => {
+            await supabase.from('elements').update({ direction: v }).eq('id', id)
+            setElements(list => list.map(e => (e.id === id ? { ...e, direction: v } : e)))
+          }
+          await set(direction)
+          history.record({ label: 'change the tone', undo: () => set(before), redo: () => set(direction) })
+        }}
+        onClipCharacter={async (id, characterId) => {
+          const before = elements.find(e => e.id === id)?.character_id ?? null
+          const set = async (v: string | null) => {
+            await supabase.from('elements').update({ character_id: v }).eq('id', id)
+            setElements(list => list.map(e => (e.id === id ? { ...e, character_id: v } : e)))
+          }
+          await set(characterId)
+          history.record({ label: 'change the speaker', undo: () => set(before), redo: () => set(characterId) })
+        }}
+        onDeleteClip={async id => {
+          const { data: full } = await supabase.from('elements').select('*').eq('id', id).single()
+          await supabase.from('elements').delete().eq('id', id)
+          if (selected === id) setSelected(null)
+          await load()
+          if (full) {
+            history.record({
+              label: 'remove',
+              undo: async () => { await supabase.from('elements').insert(full) },
+              redo: async () => { await supabase.from('elements').delete().eq('id', full.id) },
+            })
+          }
+          toast('Removed. Everything after it moved up.')
+        }}
+        onAddAfterClip={async (id, kind) => {
+          setSelected(id)
+          await insertAfter(id, kind as 'sfx')
         }}
         onFitToAudio={async id => {
           /*

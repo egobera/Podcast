@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Play, Pause, Close } from './icons'
 import type { AudioElement, Character } from '../lib/types'
-import { colourFor, labelFor } from '../lib/palette'
+import { colourFor } from '../lib/palette'
+import { applyDirection, effectiveDirection, supportsTags, DIRECTION_HINTS } from '../lib/direction'
 
 function tc(ms: number) {
   const t = Math.max(0, ms) / 1000
@@ -18,7 +19,8 @@ function tc(ms: number) {
  */
 export default function ClipCard({
   element, characters, x, playing,
-  onPlay, onGain, onNudge, onFade, onFit, onSplit, onTrim, onClose, canSplit,
+  onPlay, onGain, onNudge, onFade, onFit, onSplit, onTrim, onClose,
+  onEditText, onDirection, onSetCharacter, onDelete, onAddAfter, canSplit,
 }: {
   element: AudioElement & { start_ms: number }
   characters: Character[]
@@ -32,10 +34,24 @@ export default function ClipCard({
   onSplit: () => void
   onTrim: () => void
   onClose: () => void
+  onEditText: (text: string) => void
+  onDirection: (direction: string) => void
+  onSetCharacter: (characterId: string | null) => void
+  onDelete: () => void
+  onAddAfter: (kind: string) => void
   canSplit: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const colour = colourFor(element, characters)
+  const character = characters.find(c => c.id === element.character_id)
+  const isLine = element.kind === 'dialogue'
+
+  const [text, setText] = useState(element.text_content)
+  const [direction, setDirection] = useState(element.direction ?? '')
+
+  const tone = effectiveDirection(direction, character?.direction_notes, character?.description)
+  const tagsWork = supportsTags(character?.model ?? 'eleven_v3')
+  const spoken = applyDirection(element.text_content, tone.text, tagsWork)
   const gain = element.gain_db ?? 0
   const offset = element.offset_ms ?? 0
 
@@ -56,15 +72,75 @@ export default function ClipCard({
     >
       <header>
         <span className="clip-dot" style={{ background: colour }} />
-        <span className="clip-title">{labelFor(element, characters)}</span>
+        {isLine ? (
+          <select
+            className="clip-who"
+            value={element.character_id ?? ''}
+            onChange={e => onSetCharacter(e.target.value || null)}
+          >
+            <option value="">Nobody yet</option>
+            {characters.map(c => (
+              <option key={c.id} value={c.id}>{c.name}{c.voice_id ? '' : ' · no voice'}</option>
+            ))}
+          </select>
+        ) : (
+          <span className="clip-title">{element.kind}</span>
+        )}
         <button className="icon-btn" aria-label="Close" onClick={onClose}>
           <Close size={13} />
         </button>
       </header>
 
+      {/*
+        * The words, here rather than only in the script panel.
+        *
+        * Working on the shape of an episode and working on what somebody says are the same
+        * job done at different distances, and moving between two panels to do it broke the
+        * thought in half.
+        */}
+      <textarea
+        className="clip-text"
+        value={text}
+        rows={isLine ? 2 : 3}
+        onChange={e => setText(e.target.value)}
+        onBlur={() => { if (text.trim() && text !== element.text_content) onEditText(text) }}
+        onKeyDown={e => {
+          if (e.key === 'Escape') setText(element.text_content)
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { onEditText(text); e.currentTarget.blur() }
+        }}
+      />
+
+      {isLine && (
+        <div className="clip-direction">
+          <input
+            value={direction}
+            placeholder={tone.fromCharacter ? tone.text : 'nervioso, muy despacio, susurrando'}
+            onChange={e => setDirection(e.target.value)}
+            onBlur={() => { if (direction !== (element.direction ?? '')) onDirection(direction) }}
+          />
+          <div className="chips">
+            {DIRECTION_HINTS.slice(0, 6).map(h => (
+              <button key={h} className="chip" onClick={() => {
+                const next = direction.trim() ? `${direction.trim()}, ${h}` : h
+                setDirection(next)
+                onDirection(next)
+              }}>{h}</button>
+            ))}
+          </div>
+          <span className="hint">
+            {spoken.tags.length > 0
+              ? `The model is told: ${spoken.tags.join(' ')}`
+              : tone.fromCharacter
+                ? `Falls back to ${character?.name ?? 'the character'}`
+                : 'Nothing here, so the line is read flat.'}
+          </span>
+        </div>
+      )}
+
       <div className="clip-meta tnum">
         <span>starts {tc(element.start_ms)}</span>
         <span>lasts {tc(element.duration_ms)}</span>
+        {element.status !== 'approved' && <span>{element.status}</span>}
       </div>
 
       <div className="clip-row">
@@ -95,6 +171,20 @@ export default function ClipCard({
           onChange={e => onNudge(Number(e.target.value))} />
         <span className="tnum">{offset > 0 ? '+' : ''}{offset} ms</span>
       </label>
+
+      <div className="clip-add">
+        <select value="" onChange={e => { if (e.target.value) { onAddAfter(e.target.value); onClose() } }}>
+          <option value="">Add after this…</option>
+          <option value="sfx">A sound</option>
+          <option value="ambience">An ambience</option>
+          <option value="music">Music</option>
+          <option value="pause">A silence</option>
+          <option value="dialogue">A line</option>
+        </select>
+        <button className="btn danger-quiet" onClick={() => { onDelete(); onClose() }}>
+          Remove this
+        </button>
+      </div>
 
       <div className="clip-fades">
         <label>
