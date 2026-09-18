@@ -3,6 +3,7 @@ import { Play, Pause, Close } from './icons'
 import type { AudioElement, Character } from '../lib/types'
 import { colourFor } from '../lib/palette'
 import { applyDirection, effectiveDirection, supportsTags, DIRECTION_HINTS } from '../lib/direction'
+import { DISTANCES, distanceFromDirection } from '../lib/rooms'
 
 function tc(ms: number) {
   const t = Math.max(0, ms) / 1000
@@ -20,7 +21,7 @@ function tc(ms: number) {
 export default function ClipCard({
   element, characters, x, playing,
   onPlay, onGain, onNudge, onFade, onFit, onSplit, onTrim, onClose,
-  onEditText, onDirection, onSetCharacter, onDelete, onAddAfter, canSplit,
+  onEditText, onDirection, onSetCharacter, onDistance, onDelete, onAddAfter, canSplit,
 }: {
   element: AudioElement & { start_ms: number }
   characters: Character[]
@@ -37,6 +38,7 @@ export default function ClipCard({
   onEditText: (text: string) => void
   onDirection: (direction: string) => void
   onSetCharacter: (characterId: string | null) => void
+  onDistance: (distance: string) => void
   onDelete: () => void
   onAddAfter: (kind: string) => void
   canSplit: boolean
@@ -157,6 +159,30 @@ export default function ClipCard({
           Split
         </button>
       </div>
+
+      <label className="clip-slider">
+        <span>Where</span>
+        <select
+          className="clip-where"
+          value={element.distance ?? 'normal'}
+          onChange={e => onDistance(e.target.value)}
+        >
+          {DISTANCES.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <span />
+      </label>
+
+      {(() => {
+        // The script has been carrying this all along: "en off" is a distance.
+        const suggested = distanceFromDirection(direction || tone.text)
+        if (!suggested || suggested === (element.distance ?? 'normal')) return null
+        const label = DISTANCES.find(d => d.id === suggested)?.name
+        return (
+          <button className="clip-suggest" onClick={() => onDistance(suggested)}>
+            The direction says {label?.toLowerCase()}. Use it?
+          </button>
+        )
+      })()}
 
       <label className="clip-slider">
         <span>Level</span>

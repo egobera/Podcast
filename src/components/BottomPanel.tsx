@@ -4,6 +4,7 @@ import { Play, Pause, SkipBack, SkipForward, ChevronDown, ChevronUp, Spinner } f
 import type { AudioElement, Character, Episode, GainRole } from '../lib/types'
 import { colourFor, dim, labelFor } from '../lib/palette'
 import ClipCard from './ClipCard'
+import { ROOMS, roomById } from '../lib/rooms'
 
 const LANE_LABEL: Record<Lane, string> = { voice: 'Voice', music: 'Music', effects: 'Sound' }
 /* Three hues inside the blue family: cerulean for voice, indigo for music, steel for sound.
@@ -46,7 +47,7 @@ export default function BottomPanel({
   elements, total, duckDb, buildClips, selectedId, onSelect,
   episode, onLaneGain, onGain, onNudge, onTrimEdges, onTrimSelected, onSplit, onFade, onMeasured,
   onFitToAudio, onDeleteClip, onAddAfterClip, onEditClipText, onClipDirection,
-  onClipCharacter, extraSelected, characters,
+  onClipCharacter, onClipDistance, onSceneRoom, extraSelected, characters,
 }: {
   elements: (AudioElement & { start_ms: number })[]
   total: number
@@ -70,6 +71,8 @@ export default function BottomPanel({
   onEditClipText: (elementId: string, text: string) => void
   onClipDirection: (elementId: string, direction: string) => void
   onClipCharacter: (elementId: string, characterId: string | null) => void
+  onClipDistance: (elementId: string, distance: string) => void
+  onSceneRoom: (scene: string, roomId: string) => void
   onAddAfterClip: (elementId: string, kind: string) => void
 }) {
   const player = useRef<EpisodePlayer | null>(null)
@@ -444,6 +447,7 @@ export default function BottomPanel({
       player.current = new EpisodePlayer(duckDb)
       player.current.setMonitor(monitor)
       player.current.setLaneState(muted, soloed, laneGain)
+      player.current.setRooms(episode.scene_rooms ?? {})
     }
     if (state === 'idle') {
       setState('loading')
@@ -501,6 +505,7 @@ export default function BottomPanel({
 
   useEffect(() => {
     player.current?.setLaneState(muted, soloed, laneGain)
+    player.current?.setRooms(episode.scene_rooms ?? {})
     draw()
   }, [muted, soloed, laneGain, draw])
 
@@ -809,9 +814,18 @@ export default function BottomPanel({
                   key={`${sc.name}-${sc.startMs}`}
                   className="scene-chip"
                   style={{ left: `${Math.max(from, 0)}%`, width: `${Math.min(to, 100) - Math.max(from, 0)}%` }}
-                  title={sc.name}
+                  title={`${sc.name} · heard in ${roomById((episode.scene_rooms ?? {})[sc.name]).name}`}
                 >
                   {sc.name}
+                  {/* A scene is a place, so the room is chosen here rather than in a panel. */}
+                  <select
+                    className="scene-room"
+                    value={(episode.scene_rooms ?? {})[sc.name] ?? 'none'}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => onSceneRoom(sc.name, e.target.value)}
+                  >
+                    {ROOMS.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  </select>
                 </span>
               )
             })}
@@ -858,6 +872,7 @@ export default function BottomPanel({
                   onEditText={t => onEditClipText(el.id, t)}
                   onDirection={d => onClipDirection(el.id, d)}
                   onSetCharacter={c => onClipCharacter(el.id, c)}
+                  onDistance={d => onClipDistance(el.id, d)}
                   onDelete={() => onDeleteClip(el.id)}
                   onAddAfter={kind => onAddAfterClip(el.id, kind)}
                   onClose={() => setPopover(null)}

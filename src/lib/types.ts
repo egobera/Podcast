@@ -36,6 +36,8 @@ export interface Project {
   dismissed_patterns: string[]
   prompt_influence: number
   context_lines: boolean
+  glue: boolean
+  humanise: number
   mix_target_lufs: number
   music_duck_db: number
   style_notes: string
@@ -107,6 +109,7 @@ export interface Episode {
   target_max_ms: number
   lane_gain: Record<string, number>
   pacing: Record<string, number>
+  scene_rooms: Record<string, string>
   dialogue_scenes: string[]
 }
 
@@ -135,6 +138,7 @@ export interface AudioElement {
   gain_role: GainRole
   gain_db: number
   direction: string
+  distance: string
   offset_ms: number
   lead_silence_ms: number
   tail_silence_ms: number

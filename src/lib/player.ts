@@ -1,3 +1,4 @@
+import { buildImpulse, buildGlue, distanceById, roomById } from './rooms'
 import { GAIN_TABLE, type GainRole } from './types'
 
 export type Lane = 'voice' | 'music' | 'effects'
@@ -20,6 +21,10 @@ export interface Clip {
   /** Deliberate fades, in milliseconds. Undefined means the short automatic one. */
   fadeInMs?: number
   fadeOutMs?: number
+  /** The scene this belongs to, which decides which room it is heard in. */
+  scene?: string
+  /** How far from the microphone. Quieter, darker, and more room, all together. */
+  distance?: string
 }
 
 /*
@@ -141,16 +146,59 @@ export class EpisodePlayer {
     lp.type = 'lowpass'; lp.frequency.value = 20000
     const presence = ctx.createBiquadFilter()
     presence.type = 'peaking'; presence.frequency.value = 2000; presence.gain.value = 0; presence.Q.value = 1
+    /*
+     * The glue, last before the monitor.
+     *
+     * Gentle compression makes sources recorded in different places share a dynamic, and a
+     * touch of saturation adds the grit that anything passing through tape or a preamp
+     * picks up. Neither is audible alone; together they are most of what stops a mix
+     * sounding like files played at the same time.
+     */
+    const glue = buildGlue(ctx)
+    this.glue = glue
+    this.glueBypass = ctx.createGain()
+
+    glue.output.connect(hp)
+    this.glueBypass.connect(hp)
     hp.connect(lp).connect(presence).connect(master).connect(ctx.destination)
     this.monitorIn = hp
     this.filters = { hp, lp, presence }
 
     for (const lane of LANES) {
       const bus = ctx.createGain()
-      bus.connect(hp)
+      bus.connect(glue.input)
       this.buses.set(lane, bus)
     }
   }
+
+  private glue!: { input: AudioNode; output: AudioNode }
+  private glueBypass!: GainNode
+
+  /** One convolver per room, built once and shared by every clip in that scene. */
+  private roomSends = new Map<string, { send: GainNode; convolver: ConvolverNode }>()
+
+  private roomFor(roomId: string) {
+    const ctx = this.ctx!
+    const existing = this.roomSends.get(roomId)
+    if (existing) return existing
+
+    const room = roomById(roomId)
+    const convolver = ctx.createConvolver()
+    convolver.buffer = buildImpulse(ctx, room)
+    const send = ctx.createGain()
+    send.gain.value = 1
+    send.connect(convolver).connect(this.glue.input)
+
+    const made = { send, convolver }
+    this.roomSends.set(roomId, made)
+    return made
+  }
+
+  /** Which room each scene is heard in. Anything unlisted stays dry. */
+  setRooms(rooms: Record<string, string>) {
+    this.rooms = rooms
+  }
+  private rooms: Record<string, string> = {}
 
   private filters!: { hp: BiquadFilterNode; lp: BiquadFilterNode; presence: BiquadFilterNode }
 
@@ -316,7 +364,9 @@ export class EpisodePlayer {
         }
       }
 
-      const base = dbToGain(GAIN_TABLE[clip.role] + offset + match)
+      const base = dbToGain(
+        GAIN_TABLE[clip.role] + offset + match + distanceById(clip.distance).gainDb,
+      )
       const ducks = clip.role === 'bed' || clip.role === 'ambience'
       const isMusic = clip.role === 'bed' || clip.role === 'theme'
 
@@ -336,7 +386,32 @@ export class EpisodePlayer {
         }
       }
 
-      src.connect(gain).connect(this.buses.get(laneOf(clip.role))!)
+      /*
+       * Distance, then the room.
+       *
+       * Something further away is quieter, darker, and has more room in it relative to the
+       * direct sound. Doing only one of the three makes it sound turned down rather than
+       * further away, which is why the filter and the send move together with the level.
+       */
+      const distance = distanceById(clip.distance)
+      const tone = ctx.createBiquadFilter()
+      tone.type = 'lowpass'
+      tone.frequency.value = distance.cutoff
+
+      const lane = this.buses.get(laneOf(clip.role))!
+      src.connect(gain).connect(tone).connect(lane)
+
+      // Everything in a scene shares one room, including the glass that breaks in it.
+      const roomId = this.rooms[clip.scene ?? ''] ?? 'none'
+      if (roomId !== 'none') {
+        const room = roomById(roomId)
+        const amount = room.wet * distance.wet
+        if (amount > 0.01) {
+          const send = ctx.createGain()
+          send.gain.value = Math.min(amount, 1)
+          tone.connect(send).connect(this.roomFor(roomId).send)
+        }
+      }
 
       const when = t0 + Math.max(clipStart - fromS, 0)
       const into = Math.max(fromS - clipStart, 0) + (clip.leadMs ?? 0) / 1000

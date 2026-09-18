@@ -1906,3 +1906,30 @@ select.inline:hover { border-color: var(--text-3); }
 }
 .clip-direction .chip:hover { border-color: #5ea3dd; color: var(--ink-text-hi); }
 .clip-direction .hint { color: #6d7d8e; }
+
+/* A scene is a place, so its room is chosen on the scene itself. */
+.scene-chip { gap: 6px; }
+.scene-room {
+  background: none; border: 0; color: #5c6b7c;
+  font-size: 9px; letter-spacing: .04em; text-transform: uppercase;
+  padding: 0; cursor: pointer; max-width: 92px;
+  opacity: 0; transition: opacity .14s var(--ease), color .12s var(--ease);
+}
+.scene-chip:hover .scene-room { opacity: 1; }
+.scene-room:hover, .scene-room:focus { color: var(--ink-text-hi); opacity: 1; outline: none; }
+
+.clip-where {
+  background: var(--ink-1); color: var(--ink-text-hi);
+  border: 1px solid var(--ink-line); border-radius: var(--r-sm);
+  padding: 4px 7px; font-size: var(--t-xs); width: 100%;
+}
+.clip-where:focus { outline: none; border-color: #5ea3dd; }
+
+/* An offer, not a change. The script suggests; the person decides. */
+.clip-suggest {
+  text-align: left; font-size: 10px; line-height: 1.4;
+  color: #8fc0ea; background: rgba(95, 163, 221, .09);
+  border: 1px solid rgba(95, 163, 221, .28); border-radius: var(--r-sm);
+  padding: 6px 9px;
+}
+.clip-suggest:hover { background: rgba(95, 163, 221, .16); }

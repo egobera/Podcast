@@ -1,5 +1,6 @@
 import type { ElementKind, Anchor, GainRole } from './types'
 import { gapAfter, leadFor, DEFAULT_PACING, type Pacing } from './pacing'
+import { humanise } from './rooms'
 
 /** A block marker found in the script, and the range of elements it wraps. */
 export interface BlockMark {
@@ -319,6 +320,14 @@ export interface Placeable {
 export function layout<T extends Placeable>(
   elements: T[],
   pacing: Pacing = DEFAULT_PACING,
+  /**
+   * How much each gap is allowed to wobble.
+   *
+   * The pacing engine places every gap to the millisecond, which is exactly what a person
+   * never does. A small wobble reads as human immediately. It is derived from the element
+   * id rather than random, or the episode would shift under you on every redraw.
+   */
+  wobble = 0,
 ): Map<string, number> {
   const starts = new Map<string, number>()
   const ordered = [...elements].sort((a, b) => a.idx - b.idx)
@@ -357,7 +366,8 @@ export function layout<T extends Placeable>(
     starts.set(el.id, Math.max(at, 0))
 
     if (el.anchor === 'line') {
-      cursor += sounding + gapAfter(shape, nextShape, pacing)
+      const gap = gapAfter(shape, nextShape, pacing)
+      cursor += sounding + (wobble > 0 ? humanise(el.id, gap, wobble) : gap)
     }
   }
 

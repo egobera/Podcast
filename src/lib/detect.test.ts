@@ -417,3 +417,64 @@ describe('loudness matching', () => {
     expect(loudness(tone(0))).toBe(0)
   })
 })
+
+describe('rooms and distance', () => {
+  it('reads a stage direction as a distance', async () => {
+    // "Desde la cocina" was always a distance; nothing was listening to it.
+    const { distanceFromDirection } = await import('./rooms')
+    expect(distanceFromDirection('desde la cocina, tranquila')).toBe('offstage')
+    expect(distanceFromDirection('en off, nervioso')).toBe('offstage')
+    expect(distanceFromDirection('desde el pasillo')).toBe('far')
+    expect(distanceFromDirection('muy bajito')).toBe('close')
+  })
+
+  it('says nothing when the direction is only about feeling', async () => {
+    const { distanceFromDirection } = await import('./rooms')
+    expect(distanceFromDirection('enfadado, rápido')).toBeNull()
+    expect(distanceFromDirection('')).toBeNull()
+  })
+
+  it('makes a bigger room a longer one', async () => {
+    const { roomById } = await import('./rooms')
+    expect(roomById('cavern').decay).toBeGreaterThan(roomById('bedroom').decay)
+  })
+
+  it('moves level, tone and room together with distance', async () => {
+    // Moving one without the others sounds turned down, not further away.
+    const { distanceById } = await import('./rooms')
+    const near = distanceById('close')
+    const far = distanceById('offstage')
+    expect(far.gainDb).toBeLessThan(near.gainDb)
+    expect(far.cutoff).toBeLessThan(near.cutoff)
+    expect(far.wet).toBeGreaterThan(near.wet)
+  })
+})
+
+describe('humanise', () => {
+  it('leaves the same element the same amount every time', async () => {
+    // Random would move the episode under you on every redraw.
+    const { humanise } = await import('./rooms')
+    expect(humanise('abc', 300)).toBe(humanise('abc', 300))
+  })
+
+  it('gives two elements different wobbles', async () => {
+    const { humanise } = await import('./rooms')
+    const a = humanise('one-element-id', 300)
+    const b = humanise('another-element-id', 300)
+    expect(a).not.toBe(b)
+  })
+
+  it('stays within the amount asked for', async () => {
+    const { humanise } = await import('./rooms')
+    for (const id of ['a', 'b', 'c', 'd', 'e', 'f']) {
+      const out = humanise(id, 300, 0.14)
+      expect(out).toBeGreaterThanOrEqual(258)
+      expect(out).toBeLessThanOrEqual(342)
+    }
+  })
+
+  it('does nothing to a gap of zero', async () => {
+    const { humanise } = await import('./rooms')
+    expect(humanise('a', 0)).toBe(0)
+  })
+})

@@ -843,6 +843,8 @@ export default function EpisodeView({
       clips.push({
         id: el.id, url, startMs: el.start_ms, durationMs: el.duration_ms,
         role, anchor: el.anchor, gainDb: el.gain_db ?? 0,
+        scene: el.scene,
+        distance: el.distance ?? 'normal',
         leadMs: el.lead_silence_ms ?? 0,
         fadeInMs: el.fade_in_ms ?? undefined,
         fadeOutMs: el.fade_out_ms ?? undefined,
@@ -877,7 +879,10 @@ export default function EpisodeView({
     return clips
   }, [assets, toast, sceneTakes])
 
-  const starts = useMemo(() => layout(elements, pacingFor(episode)), [elements, episode])
+  const starts = useMemo(
+    () => layout(elements, pacingFor(episode), project.humanise ?? 0.14),
+    [elements, episode, project.humanise],
+  )
   const positioned = useMemo(
     () => elements.map(e => ({ ...e, start_ms: starts.get(e.id) ?? 0 }))
       .sort((a, b) => a.start_ms - b.start_ms || a.idx - b.idx),
@@ -1832,6 +1837,33 @@ export default function EpisodeView({
           }
           await set(direction)
           history.record({ label: 'change the tone', undo: () => set(before), redo: () => set(direction) })
+        }}
+        onClipDistance={async (id, distance) => {
+          const before = elements.find(e => e.id === id)?.distance ?? 'normal'
+          const set = async (v: string) => {
+            await supabase.from('elements').update({ distance: v }).eq('id', id)
+            setElements(list => list.map(e => (e.id === id ? { ...e, distance: v } : e)))
+          }
+          await set(distance)
+          history.record({ label: 'move it closer or further', undo: () => set(before), redo: () => set(distance) })
+        }}
+        onSceneRoom={async (scene, roomId) => {
+          const before = { ...(episode.scene_rooms ?? {}) }
+          const next = { ...before, [scene]: roomId }
+          await supabase.from('episodes').update({ scene_rooms: next }).eq('id', episode.id)
+          episode.scene_rooms = next
+          setElements(e => [...e])
+          history.record({
+            label: 'change the room',
+            undo: async () => {
+              await supabase.from('episodes').update({ scene_rooms: before }).eq('id', episode.id)
+              episode.scene_rooms = before
+            },
+            redo: async () => {
+              await supabase.from('episodes').update({ scene_rooms: next }).eq('id', episode.id)
+              episode.scene_rooms = next
+            },
+          })
         }}
         onClipCharacter={async (id, characterId) => {
           const before = elements.find(e => e.id === id)?.character_id ?? null
