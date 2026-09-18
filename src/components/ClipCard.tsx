@@ -21,7 +21,7 @@ function tc(ms: number) {
 export default function ClipCard({
   element, characters, x, playing,
   onPlay, onGain, onNudge, onFade, onFit, onSplit, onTrim, onClose,
-  onEditText, onDirection, onSetCharacter, onDistance, onDelete, onAddAfter, canSplit,
+  onEditText, onDirection, onSetCharacter, onDistance, onAnchor, onDelete, onAddAfter, canSplit,
 }: {
   element: AudioElement & { start_ms: number }
   characters: Character[]
@@ -39,6 +39,7 @@ export default function ClipCard({
   onDirection: (direction: string) => void
   onSetCharacter: (characterId: string | null) => void
   onDistance: (distance: string) => void
+  onAnchor: (anchor: 'line' | 'scene') => void
   onDelete: () => void
   onAddAfter: (kind: string) => void
   canSplit: boolean
@@ -159,6 +160,25 @@ export default function ClipCard({
           Split
         </button>
       </div>
+
+      {!isLine && (
+        <div className="clip-anchor">
+          <button
+            aria-pressed={element.anchor === 'line'}
+            onClick={() => onAnchor('line')}
+            title="Everything after it waits until this finishes"
+          >
+            Takes its own time
+          </button>
+          <button
+            aria-pressed={element.anchor === 'scene'}
+            onClick={() => onAnchor('scene')}
+            title="Plays underneath whatever else is happening"
+          >
+            Runs underneath
+          </button>
+        </div>
+      )}
 
       <label className="clip-slider">
         <span>Where</span>

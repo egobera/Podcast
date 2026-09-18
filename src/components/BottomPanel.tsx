@@ -47,7 +47,8 @@ export default function BottomPanel({
   elements, total, duckDb, buildClips, selectedId, onSelect,
   episode, onLaneGain, onGain, onNudge, onTrimEdges, onTrimSelected, onSplit, onFade, onMeasured,
   onFitToAudio, onDeleteClip, onAddAfterClip, onEditClipText, onClipDirection,
-  onClipCharacter, onClipDistance, onSceneRoom, extraSelected, characters,
+  onClipCharacter, onClipDistance, onClipAnchor, onSceneRoom, onFixOverlaps,
+  extraSelected, characters,
 }: {
   elements: (AudioElement & { start_ms: number })[]
   total: number
@@ -72,7 +73,9 @@ export default function BottomPanel({
   onClipDirection: (elementId: string, direction: string) => void
   onClipCharacter: (elementId: string, characterId: string | null) => void
   onClipDistance: (elementId: string, distance: string) => void
+  onClipAnchor: (elementId: string, anchor: 'line' | 'scene') => void
   onSceneRoom: (scene: string, roomId: string) => void
+  onFixOverlaps: (overlaps: { id: string; byMs: number }[]) => void
   onAddAfterClip: (elementId: string, kind: string) => void
 }) {
   const player = useRef<EpisodePlayer | null>(null)
@@ -405,6 +408,46 @@ export default function BottomPanel({
       }
     })
 
+    /*
+     * Where two clips on the same lane are talking at once.
+     *
+     * An overlap is usually a length that disagrees with its file, and until now the only
+     * symptom was that the episode sounded wrong and the playhead seemed to run ahead of
+     * what you could hear. Drawing it puts the diagnosis on screen.
+     */
+    for (const lane of LANES) {
+      const onLane = drawable
+        .filter(c => c.lane === lane && c.ready)
+        .sort((a, b) => a.startMs - b.startMs)
+
+      for (let i = 0; i < onLane.length - 1; i++) {
+        const a = onLane[i]
+        const b = onLane[i + 1]
+        const end = a.startMs + a.durationMs
+        if (end <= b.startMs + 40) continue
+
+        const from = px(b.startMs)
+        const to = px(end)
+        const top = LANES.indexOf(lane) * laneH + 3
+        g.save()
+        g.globalAlpha = 0.5
+        g.fillStyle = '#a13c3c'
+        g.beginPath()
+        g.rect(from, top, Math.max(to - from, 2), laneH - 6)
+        g.clip()
+        // Hatched, so it reads as a warning and not as another clip.
+        g.strokeStyle = '#d06060'
+        g.lineWidth = 1
+        for (let x = from - laneH; x < to + laneH; x += 6) {
+          g.beginPath()
+          g.moveTo(x, top + laneH)
+          g.lineTo(x + laneH, top)
+          g.stroke()
+        }
+        g.restore()
+      }
+    }
+
     // Scene boundaries, running the full height behind everything else.
     g.strokeStyle = 'rgba(255,255,255,.10)'
     g.setLineDash([2, 4])
@@ -673,6 +716,22 @@ export default function BottomPanel({
     window.addEventListener('pointerup', up)
   }
 
+  /** Pairs where one clip runs into the next on the same lane. */
+  const overlaps = (() => {
+    const out: { id: string; byMs: number }[] = []
+    for (const lane of LANES) {
+      const onLane = drawable
+        .filter(c => c.lane === lane && c.ready)
+        .sort((a, b) => a.startMs - b.startMs)
+      for (let i = 0; i < onLane.length - 1; i++) {
+        const end = onLane[i].startMs + onLane[i].durationMs
+        const over = end - onLane[i + 1].startMs
+        if (over > 40) out.push({ id: onLane[i + 1].id, byMs: Math.round(over) })
+      }
+    }
+    return out
+  })()
+
   const selected = elements.find(e => e.id === selectedId) ?? null
   /** The dB trim buttons, named apart from the timing nudge they sit next to. */
   function nudgeGain(delta: number) {
@@ -873,6 +932,7 @@ export default function BottomPanel({
                   onDirection={d => onClipDirection(el.id, d)}
                   onSetCharacter={c => onClipCharacter(el.id, c)}
                   onDistance={d => onClipDistance(el.id, d)}
+                  onAnchor={a => onClipAnchor(el.id, a)}
                   onDelete={() => onDeleteClip(el.id)}
                   onAddAfter={kind => onAddAfterClip(el.id, kind)}
                   onClose={() => setPopover(null)}

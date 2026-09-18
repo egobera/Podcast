@@ -1838,6 +1838,73 @@ export default function EpisodeView({
           await set(direction)
           history.record({ label: 'change the tone', undo: () => set(before), redo: () => set(direction) })
         }}
+        onFixOverlaps={async list => {
+          /*
+           * Push each clip that is being talked over far enough to be clear.
+           *
+           * The offsets of the ones that follow move with it, so making room genuinely
+           * makes room rather than creating the next overlap along. A small gap is added
+           * on top, because two clips that end and begin on exactly the same millisecond
+           * still sound like a collision.
+           */
+          const before = new Map(elements.map(e => [e.id, e.offset_ms ?? 0]))
+          const ordered = [...elements].sort((a, b) => a.idx - b.idx)
+
+          const apply = async (restore: boolean) => {
+            if (restore) {
+              for (const [id, v] of before) {
+                await supabase.from('elements').update({ offset_ms: v }).eq('id', id)
+              }
+              setElements(list2 => list2.map(e => ({ ...e, offset_ms: before.get(e.id) ?? 0 })))
+              return
+            }
+
+            const shifted = new Map(before)
+            for (const { id, byMs } of list) {
+              const from = ordered.findIndex(e => e.id === id)
+              if (from < 0) continue
+              const push = byMs + 120
+              for (let i = from; i < ordered.length; i++) {
+                const e = ordered[i]
+                if (e.kind === 'pause') continue
+                shifted.set(e.id, (shifted.get(e.id) ?? 0) + push)
+              }
+            }
+            for (const [id, v] of shifted) {
+              if (v === (before.get(id) ?? 0)) continue
+              await supabase.from('elements').update({ offset_ms: v }).eq('id', id)
+            }
+            setElements(list2 => list2.map(e => ({ ...e, offset_ms: shifted.get(e.id) ?? 0 })))
+          }
+
+          await apply(false)
+          history.record({
+            label: `clear ${list.length} overlaps`,
+            undo: () => apply(true),
+            redo: () => apply(false),
+          })
+          toast(`${list.length} cleared. Nothing is talking over anything else now.`)
+        }}
+        onClipAnchor={async (id, anchor) => {
+          /*
+           * The difference between a stinger and a bed.
+           *
+           * A bed is anchored to the scene, so it plays underneath and the dialogue carries
+           * on over it. A theme or a sting is anchored to the line, so everything after it
+           * waits. Getting this wrong is what makes a chorus play on top of a conversation.
+           */
+          const before = elements.find(e => e.id === id)?.anchor ?? 'scene'
+          const set = async (v: 'line' | 'scene') => {
+            await supabase.from('elements').update({ anchor: v }).eq('id', id)
+            setElements(list => list.map(e => (e.id === id ? { ...e, anchor: v } : e)))
+          }
+          await set(anchor)
+          history.record({
+            label: anchor === 'line' ? 'make it take its own time' : 'make it run underneath',
+            undo: () => set(before),
+            redo: () => set(anchor),
+          })
+        }}
         onClipDistance={async (id, distance) => {
           const before = elements.find(e => e.id === id)?.distance ?? 'normal'
           const set = async (v: string) => {
