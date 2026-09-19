@@ -631,11 +631,30 @@ export default function EpisodeView({
         } catch { /* one unreadable file should not stop the rest */ }
       }
 
+      /*
+       * Anything the pass could not reach is marked too.
+       *
+       * A clip whose audio never arrived cannot be measured, and leaving it unmarked meant
+       * the counter kept asking for work that could not be done. It is recorded as seen so
+       * the number reflects what is left to fix, not what is impossible.
+       */
+      const reachable = new Set(clips.map(c => c.id))
+      const unreachable = elements.filter(e =>
+        e.kind !== 'pause' && !e.measured && !reachable.has(e.id))
+      for (const e of unreachable) {
+        await supabase.from('elements').update({ measured: true }).eq('id', e.id)
+      }
+
       await ctx.close()
       await load()
-      toast(fixed > 0
-        ? `${fixed} clips now match their audio. Nothing you moved or faded was touched.`
-        : 'Everything already matches its audio.')
+
+      if (fixed > 0) {
+        toast(`${fixed} clips now match their audio. Nothing you moved or faded was touched.`)
+      } else if (unreachable.length > 0) {
+        toast(`Nothing to measure: ${unreachable.length} of these have no audio yet.`)
+      } else {
+        toast('Everything already matches its audio.')
+      }
     } finally {
       setBusyId(null)
     }
@@ -906,11 +925,22 @@ export default function EpisodeView({
      * a trimmed file or a bed has none, so it measured fine and went on counting as
      * pending forever.
      */
-    mismatched: allRows.filter(e =>
-      e.kind !== 'pause'
-      && (e.status === 'approved' || e.status === 'generated' || e.series_asset_id)
-      && (e.offset_ms ?? 0) === 0 && e.fade_in_ms === null && e.fade_out_ms === null
-      && !e.measured).length,
+    /*
+     * Counted only when there is a file to measure.
+     *
+     * Pointing at a vault entry used to count as having audio, so an element whose entry
+     * was still empty was counted forever: measuring found nothing, fixed nothing, and the
+     * number never moved. A missing sound is a different problem, and the readiness list
+     * is where it belongs.
+     */
+    mismatched: allRows.filter(e => {
+      if (e.kind === 'pause' || e.measured) return false
+      if ((e.offset_ms ?? 0) !== 0 || e.fade_in_ms !== null || e.fade_out_ms !== null) return false
+      if (e.series_asset_id) {
+        return !!assets.find(a => a.id === e.series_asset_id)?.storage_path
+      }
+      return e.status === 'approved' || e.status === 'generated'
+    }).length,
   }
   const visible = allRows.filter(e =>
     filter === 'all' ? true
@@ -1403,6 +1433,19 @@ export default function EpisodeView({
               done: assets.some(a => a.auto_place === 'open' || a.auto_place === 'close')
                 && assets.filter(a => (a.auto_place === 'open' || a.auto_place === 'close') && !a.storage_path).length === 0,
               hint: 'Upload them in the vault. Music comes from outside; it is not generated.',
+            },
+            {
+              label: (() => {
+                const silent = elements.filter(e =>
+                  e.series_asset_id
+                  && !assets.find(a => a.id === e.series_asset_id)?.storage_path)
+                return silent.length === 0
+                  ? 'Every sound the script asks for has audio'
+                  : `${silent.length} elements point at empty vault entries`
+              })(),
+              done: !elements.some(e =>
+                e.series_asset_id && !assets.find(a => a.id === e.series_asset_id)?.storage_path),
+              hint: 'They play as silence. Generate or upload them in the vault.',
             },
             {
               label: guessed.length === 0
